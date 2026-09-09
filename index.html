@@ -189,7 +189,7 @@
     <div class="max-w-7xl mx-auto px-4 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
       <div>
         <img src="img/logo.gif" alt="Agrovel" class="h-10 w-auto mb-3">
-        <p class="text-sm leading-relaxed"><strong class="text-white">Mais que Produtos, Soluções.</strong> Solucoes completas para o campo e seus animais. Medicamentos, racoes, equipamentos e muito mais com procedencia e qualidade.</p>
+        <p class="text-sm leading-relaxed"><strong class="text-white">Mais que Produtos, Soluções.</strong> Soluções inteligentes e completas para o seu campo e seus animais. Medicamentos, nutrição e tecnologia com garantia de procedência e padrão ouro de qualidade.</p>
       </div>
       <div>
         <div class="text-white font-semibold mb-3">Categorias</div>
@@ -201,7 +201,7 @@
           <li>Frete a negociar</li>
           <li>Mais de 12.000 produtos</li>
           <li>Produtos com garantia</li>
-          <li>Assistencia veterinaria</li>
+          <li>Farmácia veterinária</li>
         </ul>
       </div>
       <div>
@@ -878,7 +878,7 @@ function renderCatalog(){
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Seu nome</label>'+ 
         '<input id="contact-name" type="text" required class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="Digite seu nome">'+ 
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Telefone</label>'+ 
-        '<input id="contact-phone" type="tel" required class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="(55) 99109-5001">'+ 
+        '<input id="contact-phone" type="tel" required class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="Digite seu telefone">'+ 
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Interesse</label>'+ 
         '<input id="contact-interest" type="text" class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="Ex.: ração, vacina, equipamento...">'+ 
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Mensagem</label>'+ 
@@ -1318,14 +1318,6 @@ function renderLogin(){
             '</div></div>'+
           '<button type="submit" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-xl transition-all hover:shadow-lg text-base"><i class="fas fa-sign-in-alt mr-2"></i>Entrar</button>'+
         '</form>'+
-        '<div class="mt-6 pt-6 border-t border-green-100">'+
-          '<p class="text-xs text-gray-400 text-center mb-3 font-medium">Contas de demonstracao:</p>'+
-          '<div class="grid grid-cols-3 gap-2">'+
-            [['beto@agrovel.com','admin123','Admin'],['vendedor@agrovet.com','vend123','Vendedor'],['convidado@agrovet.com','conv123','Convidado']].map(function(v){return '<button onclick="fillLogin(\''+v[0]+'\',\''+v[1]+'\')" class="text-xs p-2 rounded-lg bg-green-50 hover:bg-green-100 text-green-700 transition-colors border border-green-200 text-center">'+
-              '<div class="font-bold">'+v[2]+'</div><div class="text-green-500">'+v[0].split('@')[0]+'</div>'+
-            '</button>'}).join('')+
-          '</div>'+
-        '</div>'+
         '<button onclick="navigate(\'catalog\')" class="w-full mt-4 text-gray-500 hover:text-green-700 text-sm py-2 transition-colors">Voltar a loja</button>'+
       '</div>'+
     '</div>'+
