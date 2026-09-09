@@ -2,7 +2,10 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, user-scalable=yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#14532d">
 <title>Agrovel — Mais que Produtos, Soluções</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
@@ -70,7 +73,32 @@
   .img-chip .del-chip{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(220,38,38,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;opacity:0;transition:opacity .2s}
   .img-chip:hover .del-chip{opacity:1}
   .img-chip.primary{border-color:#16a34a}
-  @media(max-width:768px){#toast{bottom:80px;right:12px}}
+  @media(max-width:768px){
+    #toast{bottom:80px;right:12px}
+    #cart-sidebar,#copilot-panel{width:100%!important;max-width:100%!important}
+    #mobile-menu{max-height:0;overflow:hidden;transition:max-height .3s ease}
+    #mobile-menu.open{max-height:400px}
+    .admin-sidebar{position:fixed;left:0;top:0;z-index:60;transform:translateX(-100%);transition:transform .3s ease;width:280px!important}
+    .admin-sidebar.open{transform:translateX(0)}
+    .admin-mobile-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:55;display:none}
+    .admin-mobile-overlay.show{display:block}
+    .carousel-arrow{width:36px;height:36px;font-size:14px}
+    .carousel-arrow.prev{left:8px}
+    .carousel-arrow.next{right:8px}
+    .carousel-slide-inner .absolute{padding:16px!important}
+    .whatsapp-float{bottom:16px;left:16px;width:48px;height:48px;font-size:24px}
+    .footer-grid{grid-template-columns:1fr!important}
+    .checkout-grid{grid-template-columns:1fr!important}
+    .product-detail-grid{grid-template-columns:1fr!important}
+    .cart-items-grid{grid-template-columns:1fr!important}
+    .admin-content-area{padding:12px!important}
+    .dashboard-cards{grid-template-columns:1fr 1fr!important}
+    .header-btn-text{display:none}
+    .sidebar-user-section{display:none}
+  }
+  @media(max-width:480px){
+    .dashboard-cards{grid-template-columns:1fr!important}
+  }
 </style>
 </head>
 <body class="min-h-screen bg-green-50">
@@ -119,20 +147,32 @@
   <!-- HEADER (public) -->
   <header id="public-header" class="bg-green-900 text-white shadow-lg sticky top-0 z-30">
     <div class="max-w-7xl mx-auto px-4">
-      <div class="flex items-center justify-between h-36">
-        <button onclick="navigate('catalog')" class="flex items-center gap-3 transition-all duration-300 hover:scale-105 p-2 rounded-2xl hover:bg-white/10">
-          <img src="img/logo.gif" alt="Agrovel" class="h-32 w-auto logo-glow">
-        </button>
+      <div class="flex items-center justify-between h-20 md:h-36">
+        <div class="flex items-center gap-3">
+          <button onclick="toggleMobileMenu()" class="md:hidden text-white text-xl p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="Menu">
+            <i class="fas fa-bars"></i>
+          </button>
+          <button onclick="navigate('catalog')" class="flex items-center gap-3 transition-all duration-300 hover:scale-105 p-2 rounded-2xl hover:bg-white/10">
+            <img src="img/logo.gif" alt="Agrovel" class="h-24 md:h-32 w-auto logo-glow">
+          </button>
+        </div>
         <nav class="hidden md:flex items-center gap-6 text-sm">
           <button onclick="navigate('catalog')" class="hover:text-green-300 transition-colors font-medium">Catalogo</button>
           <span id="header-cat-nav"></span>
         </nav>
-        <div class="flex items-center gap-3">
-          <button onclick="window.open('https://wa.me/5511999998888?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20produtos%20do%20cat%C3%A1logo','_blank')" class="text-sm bg-amber-500 hover:bg-amber-400 text-white px-4 py-2 rounded-lg transition-colors font-medium">
+        <div class="flex items-center gap-2 md:gap-3">
+          <button onclick="window.open('https://wa.me/5511999998888?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20produtos%20do%20cat%C3%A1logo','_blank')" class="text-sm bg-amber-500 hover:bg-amber-400 text-white px-3 md:px-4 py-2 rounded-lg transition-colors font-medium header-btn-text">
             <i class="fab fa-whatsapp mr-1.5"></i>Falar com vendedor
+          </button>
+          <button onclick="window.open('https://wa.me/5511999998888?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20produtos%20do%20cat%C3%A1logo','_blank')" class="md:hidden bg-amber-500 hover:bg-amber-400 text-white w-10 h-10 rounded-lg transition-colors flex items-center justify-center">
+            <i class="fab fa-whatsapp"></i>
           </button>
           <div id="user-menu" class="flex items-center gap-2"></div>
         </div>
+      </div>
+      <div id="mobile-menu" class="md:hidden border-t border-green-800 pb-3">
+        <button onclick="navigate('catalog');toggleMobileMenu()" class="w-full text-left px-4 py-3 text-sm hover:bg-green-800 rounded-lg transition-colors"><i class="fas fa-store mr-2"></i>Catalogo</button>
+        <span id="mobile-cat-nav"></span>
       </div>
     </div>
   </header>
@@ -142,7 +182,7 @@
 
   <!-- FOOTER -->
   <footer id="public-footer" class="bg-green-900 text-green-200 mt-16">
-    <div class="max-w-7xl mx-auto px-4 py-12 grid grid-cols-1 md:grid-cols-4 gap-8">
+    <div class="max-w-7xl mx-auto px-4 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
       <div>
         <img src="img/logo.gif" alt="Agrovel" class="h-10 w-auto mb-3">
         <p class="text-sm leading-relaxed"><strong class="text-white">Mais que Produtos, Soluções.</strong> Solucoes completas para o campo e seus animais. Medicamentos, racoes, equipamentos e muito mais com procedencia e qualidade.</p>
@@ -496,6 +536,29 @@ function renderCategoryNavs(){
   if(ftr) ftr.innerHTML=cats.map(function(c){
     return '<li><button onclick="filterCategory(\''+c+'\')" class="hover:text-white">'+c+'</button></li>';
   }).join('');
+  var mnav=document.getElementById('mobile-cat-nav');
+  if(mnav) mnav.innerHTML=cats.map(function(c){
+    return '<button onclick="filterCategory(\''+c+'\');toggleMobileMenu()" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas '+iconForCat(c)+' mr-2 text-green-500"></i>'+c+'</button>';
+  }).join('');
+}
+
+function toggleMobileMenu(){
+  var menu=document.getElementById('mobile-menu');
+  if(menu) menu.classList.toggle('open');
+}
+
+function toggleAdminSidebar(){
+  var sidebar=document.querySelector('.admin-sidebar');
+  var overlay=document.querySelector('.admin-mobile-overlay');
+  if(sidebar) sidebar.classList.toggle('open');
+  if(overlay) overlay.classList.toggle('show');
+}
+
+function closeAdminSidebar(){
+  var sidebar=document.querySelector('.admin-sidebar');
+  var overlay=document.querySelector('.admin-mobile-overlay');
+  if(sidebar) sidebar.classList.remove('open');
+  if(overlay) overlay.classList.remove('show');
 }
 
 // ============================================================
@@ -508,6 +571,8 @@ function navigate(view,params){
   if(view.startsWith('admin')&&!user){navigate('login');return}
   if(view.startsWith('admin')&&user&&user.role==='guest'){showToast('Sem permissao para esta area','error');return}
   if(view==='admin'&&user&&user.role==='seller'){State.adminSection='products';State.view='admin';render();return}
+  var mm=document.getElementById('mobile-menu');
+  if(mm)mm.classList.remove('open');
   State.view=view;
   Object.assign(State,params);
   render();
@@ -599,9 +664,9 @@ function renderFeaturedCarousel(featured){
               '<span class="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-white/25">'+p.category+'</span>'+
               (p.brand?'<span class="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-white/25">'+p.brand+'</span>':'')+
             '</div>'+
-            '<h2 class="carousel-fade-title text-3xl md:text-5xl font-bold text-white mb-3 leading-tight drop-shadow">'+p.name+'</h2>'+
-            '<p class="carousel-fade-copy text-white/80 text-base md:text-lg mb-5 max-w-xl leading-relaxed">'+(p.description||'Produto de alta qualidade para o campo e seus animais.')+'</p>'+
-            '<span class="inline-flex items-center gap-2 bg-white text-green-900 text-sm font-bold px-5 py-2.5 rounded-xl shadow-lg transition-transform group-hover:scale-105"><i class="fas fa-shopping-bag"></i> Ver Produto</span>'+
+            '<h2 class="carousel-fade-title text-2xl md:text-4xl lg:text-5xl font-bold text-white mb-2 md:mb-3 leading-tight drop-shadow">'+p.name+'</h2>'+
+            '<p class="carousel-fade-copy text-white/80 text-sm md:text-base lg:text-lg mb-3 md:mb-5 max-w-xl leading-relaxed">'+(p.description||'Produto de alta qualidade para o campo e seus animais.')+'</p>'+
+            '<span class="inline-flex items-center gap-2 bg-white text-green-900 text-xs md:text-sm font-bold px-4 md:px-5 py-2 md:py-2.5 rounded-xl shadow-lg transition-transform group-hover:scale-105"><i class="fas fa-shopping-bag"></i> Ver Produto</span>'+
           '</div>'+
         '</div>'+
       '</div>'+
@@ -619,7 +684,7 @@ function renderFeaturedCarousel(featured){
     '<div class="relative max-w-7xl mx-auto px-4 py-14 md:py-20">'+
       '<div class="text-center mb-8">'+
         '<div class="inline-flex items-center gap-2 bg-amber-500/90 text-green-950 px-5 py-2 rounded-full text-sm font-bold mb-4 shadow-lg"><i class="fas fa-medal"></i> Desde 1998 &bull; Iju&iacute; - RS</div>'+
-        '<h1 class="text-4xl md:text-6xl font-bold leading-tight mb-3">Mais que <span class="text-amber-400">Produtos, Soluções!</span></h1>'+
+        '<h1 class="text-3xl md:text-5xl lg:text-6xl font-bold leading-tight mb-3">Mais que <span class="text-amber-400">Produtos, Soluções!</span></h1>'+
         //'<p class="text-lg text-green-200 max-w-2xl mx-auto">Produtos selecionados para o campo e para o pet shop, com as melhores condições.</p>'+
       '</div>'+
       '<div class="carousel relative" id="featured-carousel" onmouseenter="featPause(true)" onmouseleave="featPause(false)">'+
@@ -787,8 +852,8 @@ function renderCatalog(){
     '</div>'+
   '</section>'+
 
-  '<section class="max-w-7xl mx-auto px-4 pb-16">'+
-    '<div class="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-8 rounded-3xl border border-green-200 bg-white p-8 shadow-sm">'+
+  '<section class="max-w-7xl mx-auto px-4 pb-12 md:pb-16">'+
+    '<div class="grid grid-cols-1 lg:grid-cols-[1.1fr_0.9fr] gap-6 md:gap-8 rounded-3xl border border-green-200 bg-white p-5 md:p-8 shadow-sm">'+
       '<div>'+ 
         '<p class="text-sm font-semibold uppercase tracking-[0.24em] text-green-600 mb-3">Atendimento especializado</p>'+ 
         '<h3 class="text-2xl font-bold text-gray-900 mb-4">Precisa de ajuda para encontrar o produto certo?</h3>'+ 
@@ -884,15 +949,15 @@ function renderProductDetail(id){
   trackEvent('product_view',{productId:p.id,name:p.name,brand:p.brand||'',category:p.category});
   const discount=p.originalPrice?Math.round((1-p.price/p.originalPrice)*100):0;
   const related=DB.products().filter(function(x){return x.active&&x.category===p.category&&x.id!==p.id}).slice(0,4);
-  return'<div class="max-w-7xl mx-auto px-4 py-10 fade-in">'+
-    '<nav class="text-sm text-gray-500 mb-6 flex items-center gap-2 flex-wrap">'+
+  return'<div class="max-w-7xl mx-auto px-4 py-6 md:py-10 fade-in">'+
+    '<nav class="text-xs md:text-sm text-gray-500 mb-4 md:mb-6 flex items-center gap-2 flex-wrap">'+
       '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">Inicio</button>'+
       '<i class="fas fa-chevron-right text-xs"></i>'+
       '<button onclick="filterCategory(\''+p.category+'\')" class="hover:text-green-700">'+p.category+'</button>'+
       '<i class="fas fa-chevron-right text-xs"></i>'+
       '<span class="text-gray-800 font-medium">'+p.name+'</span>'+
     '</nav>'+
-    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-16">'+
+    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12 mb-12 md:mb-16">'+
       '<div>'+
         '<div class="rounded-2xl overflow-hidden aspect-square mb-4 bg-gray-100">'+
           '<img id="main-img" src="'+p.images[0]+'" alt="'+p.name+'" class="w-full h-full object-cover">'+
@@ -910,7 +975,7 @@ function renderProductDetail(id){
           (p.featured?'<span class="text-xs font-semibold text-green-700 bg-green-200 px-3 py-1 rounded-full"><i class="fas fa-star mr-1"></i>Destaque</span>':'')+
           (p.prescription?'<span class="text-xs font-semibold text-amber-700 bg-amber-200 px-3 py-1 rounded-full"><i class="fas fa-prescription mr-1"></i>Venda sob receita</span>':'')+
         '</div>'+
-        '<h1 class="text-3xl font-bold text-gray-900 mb-3">'+p.name+'</h1>'+
+        '<h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-3">'+p.name+'</h1>'+
         '<div class="flex items-center gap-3 mb-4">'+
           '<div class="flex items-center gap-1">'+stars(p.rating)+'</div>'+
           '<span class="text-sm font-semibold text-gray-700">'+p.rating.toFixed(1)+'</span>'+
@@ -949,7 +1014,7 @@ function renderProductDetail(id){
         '</div>':'')+
       '</div>'+
     '</div>'+
-    (related.length?'<div><h2 class="text-2xl font-bold text-gray-800 mb-6">Produtos Relacionados</h2><div class="grid grid-cols-2 md:grid-cols-4 gap-5">'+
+    (related.length?'<div><h2 class="text-lg md:text-2xl font-bold text-gray-800 mb-4 md:mb-6">Produtos Relacionados</h2><div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">'+
       related.map(function(r){return renderProductCard(r)}).join('')+
     '</div></div>':'')+
   '</div>';
@@ -996,10 +1061,13 @@ function openCart(){
 }
 
 function closeAllPanels(){
-  const ov=document.getElementById('overlay');
+  var ov=document.getElementById('overlay');
   ov.style.opacity='0';setTimeout(function(){ov.classList.add('hidden')},300);
   document.getElementById('cart-sidebar').classList.remove('open');
   document.getElementById('copilot-panel').classList.remove('open');
+  closeAdminSidebar();
+  var mm=document.getElementById('mobile-menu');
+  if(mm)mm.classList.remove('open');
 }
 
 function renderCartSidebar(){
@@ -1047,13 +1115,13 @@ function renderCartPage(){
   const cart=DB.cart();
   const subtotal=cart.reduce(function(s,x){return s+x.price*x.qty},0);
   const shipping=subtotal>=300?0:20;
-  return'<div class="max-w-4xl mx-auto px-4 py-10 fade-in">'+
-    '<h1 class="text-3xl font-bold text-gray-900 mb-8"><i class="fas fa-shopping-cart text-green-500 mr-3"></i>Meu Carrinho</h1>'+
-    (cart.length===0?'<div class="text-center py-20"><div class="text-8xl mb-5">🛒</div><h3 class="text-2xl font-bold text-gray-600 mb-4">Carrinho vazio</h3><button onclick="navigate(\'catalog\')" class="bg-green-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-green-700 transition-colors">Ver Catalogo</button></div>':
-    '<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">'+
+  return'<div class="max-w-4xl mx-auto px-4 py-8 md:py-10 fade-in">'+
+    '<h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-6 md:mb-8"><i class="fas fa-shopping-cart text-green-500 mr-3"></i>Meu Carrinho</h1>'+
+    (cart.length===0?'<div class="text-center py-16 md:py-20"><div class="text-6xl md:text-8xl mb-5">🛒</div><h3 class="text-xl md:text-2xl font-bold text-gray-600 mb-4">Carrinho vazio</h3><button onclick="navigate(\'catalog\')" class="bg-green-600 text-white px-6 md:px-8 py-3 rounded-xl font-bold hover:bg-green-700 transition-colors">Ver Catalogo</button></div>':
+    '<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">'+
       '<div class="lg:col-span-2 space-y-4">'+
-        cart.map(function(item){return '<div class="bg-white rounded-2xl p-5 shadow-sm border border-green-100 flex gap-5">'+
-          '<img src="'+item.image+'" class="w-28 h-28 rounded-xl object-cover flex-shrink-0 cursor-pointer" onclick="navigate(\'product\',{productId:\''+item.productId+'\'})">'+
+        cart.map(function(item){return '<div class="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-green-100 flex gap-3 md:gap-5">'+
+          '<img src="'+item.image+'" class="w-20 h-20 md:w-28 md:h-28 rounded-xl object-cover flex-shrink-0 cursor-pointer" onclick="navigate(\'product\',{productId:\''+item.productId+'\'})">'+
           '<div class="flex-1">'+
             '<h3 class="font-semibold text-gray-800 mb-1 hover:text-green-700 cursor-pointer" onclick="navigate(\'product\',{productId:\''+item.productId+'\'})">'+item.name+'</h3>'+
             '<p class="text-green-700 font-bold text-lg mb-3">'+fmt(item.price)+'</p>'+
@@ -1096,15 +1164,15 @@ function renderCheckout(){
   if(cart.length===0){navigate('catalog');return''}
   const subtotal=cart.reduce(function(s,x){return s+x.price*x.qty},0);
   const shipping=subtotal>=300?0:20;
-  return'<div class="max-w-5xl mx-auto px-4 py-10 fade-in">'+
-    '<h1 class="text-3xl font-bold text-gray-900 mb-2"><i class="fas fa-credit-card text-green-500 mr-3"></i>Finalizar Pedido</h1>'+
-    '<p class="text-gray-500 mb-8">Preencha seus dados para concluir a compra.</p>'+
-    '<div class="grid grid-cols-1 lg:grid-cols-5 gap-8">'+
+  return'<div class="max-w-5xl mx-auto px-4 py-8 md:py-10 fade-in">'+
+    '<h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-2"><i class="fas fa-credit-card text-green-500 mr-3"></i>Finalizar Pedido</h1>'+
+    '<p class="text-gray-500 mb-6 md:mb-8">Preencha seus dados para concluir a compra.</p>'+
+    '<div class="grid grid-cols-1 lg:grid-cols-5 gap-6 md:gap-8">'+
       '<div class="lg:col-span-3">'+
         '<form id="checkout-form" onsubmit="placeOrder(event)" class="space-y-6">'+
           '<div class="bg-white rounded-2xl p-6 shadow-sm border border-green-100">'+
             '<h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fas fa-user text-green-500"></i>Dados Pessoais</h3>'+
-            '<div class="grid grid-cols-2 gap-4">'+
+            '<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">'+
               '<div class="col-span-2"><label class="text-sm text-gray-600 mb-1 block">Nome completo *</label>'+
                 '<input name="name" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="Seu nome completo"></div>'+
               '<div><label class="text-sm text-gray-600 mb-1 block">E-mail *</label>'+
@@ -1115,7 +1183,7 @@ function renderCheckout(){
           '</div>'+
           '<div class="bg-white rounded-2xl p-6 shadow-sm border border-green-100">'+
             '<h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fas fa-map-marker-alt text-green-500"></i>Endereco de Entrega</h3>'+
-            '<div class="grid grid-cols-2 gap-4">'+
+            '<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">'+
               '<div><label class="text-sm text-gray-600 mb-1 block">CEP *</label>'+
                 '<input name="cep" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="00000-000"></div>'+
               '<div><label class="text-sm text-gray-600 mb-1 block">Numero *</label>'+
@@ -1135,7 +1203,7 @@ function renderCheckout(){
           '</div>'+
           '<div class="bg-white rounded-2xl p-6 shadow-sm border border-green-100">'+
             '<h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2"><i class="fas fa-credit-card text-green-500"></i>Forma de Pagamento</h3>'+
-            '<div class="grid grid-cols-3 gap-3">'+
+            '<div class="grid grid-cols-3 gap-2 md:gap-3">'+
               [['pix','fa-qrcode','PIX'],['cartao','fa-credit-card','Cartao'],['boleto','fa-barcode','Boleto']].map(function(v){return '<label class="flex flex-col items-center gap-2 p-4 border-2 rounded-xl cursor-pointer has-[:checked]:border-green-500 has-[:checked]:bg-green-50 border-gray-200 hover:border-green-300 transition-colors">'+
                 '<input type="radio" name="payment" value="'+v[0]+'" class="sr-only" '+(v[0]==='pix'?'checked':'')+'>'+
                 '<i class="fas '+v[1]+' text-2xl text-green-500"></i>'+
@@ -1208,12 +1276,12 @@ function placeOrder(e){
 function renderConfirmation(orderId){
   const order=DB.orders().find(function(o){return o.id===orderId});
   if(!order) return'<div class="text-center py-20"><button onclick="navigate(\'catalog\')" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar ao inicio</button></div>';
-  return'<div class="max-w-2xl mx-auto px-4 py-16 text-center fade-in">'+
-    '<div class="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-6 text-5xl">&#9989;</div>'+
-    '<h1 class="text-3xl font-bold text-gray-900 mb-3">Pedido Confirmado!</h1>'+
-    '<p class="text-gray-500 text-lg mb-2">Obrigado pela sua compra, <strong>'+order.customerName.split(' ')[0]+'</strong>!</p>'+
-    '<p class="text-gray-400 mb-8">Voce recebera um e-mail de confirmacao em breve.</p>'+
-    '<div class="bg-white rounded-2xl p-6 shadow-sm border border-green-100 mb-8 text-left">'+
+  return'<div class="max-w-2xl mx-auto px-4 py-10 md:py-16 text-center fade-in">'+
+    '<div class="w-20 h-20 md:w-24 md:h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 text-4xl md:text-5xl">&#9989;</div>'+
+    '<h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-3">Pedido Confirmado!</h1>'+
+    '<p class="text-gray-500 text-base md:text-lg mb-2">Obrigado pela sua compra, <strong>'+order.customerName.split(' ')[0]+'</strong>!</p>'+
+    '<p class="text-gray-400 mb-6 md:mb-8">Voce recebera um e-mail de confirmacao em breve.</p>'+
+    '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-green-100 mb-6 md:mb-8 text-left">'+
       '<div class="flex items-center justify-between mb-4">'+
         '<h3 class="font-bold text-gray-800">Pedido #'+order.id.slice(-6).toUpperCase()+'</h3>'+
         statusBadge(order.status)+
@@ -1303,20 +1371,22 @@ function renderAdmin(){
     {id:'copilot',icon:'fa-robot',label:'Copilot IA',role:'admin'},
   ].filter(function(n){return n.role==='both'||(isAdm&&n.role==='admin')||(isSel&&n.role==='both')});
   return'<div class="flex h-screen bg-gray-50" id="admin-wrap">'+
-    '<aside class="w-64 bg-green-900 flex flex-col flex-shrink-0 h-screen sticky top-0">'+
-      '<div class="p-5 border-b border-green-800">'+
+    '<div class="admin-mobile-overlay" onclick="closeAdminSidebar()"></div>'+
+    '<aside class="admin-sidebar w-64 bg-green-900 flex flex-col flex-shrink-0 h-screen sticky top-0">'+
+      '<div class="p-5 border-b border-green-800 flex items-center justify-between">'+
           '<button onclick="navigate(\'catalog\')" class="flex items-center gap-3 text-white hover:opacity-80 transition-opacity">'+
           '<img src="img/logo.gif" alt="Agrovel" class="h-9 w-auto">'+
           '<div><div class="font-bold text-sm">Agrovel</div><div class="text-green-400 text-xs">Painel Admin</div></div>'+
         '</button>'+
+        '<button onclick="closeAdminSidebar()" class="md:hidden text-green-400 hover:text-white text-lg"><i class="fas fa-times"></i></button>'+
       '</div>'+
       '<nav class="flex-1 p-3 space-y-1 overflow-y-auto">'+
-        navItems.map(function(n){return '<div onclick="switchAdminSection(\''+n.id+'\')" id="nav-'+n.id+'"'+
+        navItems.map(function(n){return '<div onclick="switchAdminSection(\''+n.id+'\');closeAdminSidebar()" id="nav-'+n.id+'"'+
           'class="admin-link'+(State.adminSection===n.id?' bg-green-800 text-white':'')+'">'+
           '<i class="fas '+n.icon+' w-5 text-center"></i><span>'+n.label+'</span>'+
         '</div>'}).join('')+
       '</nav>'+
-      '<div class="p-4 border-t border-green-800">'+
+      '<div class="p-4 border-t border-green-800 sidebar-user-section">'+
         '<div class="flex items-center gap-3 text-green-200 mb-3">'+
           '<div class="w-8 h-8 '+(roleColors[u.role]||'bg-gray-500')+' rounded-full flex items-center justify-center text-white text-xs font-bold">'+u.avatar+'</div>'+
           '<div><div class="text-sm font-medium text-white">'+u.name+'</div><div class="text-xs capitalize">'+u.role+'</div></div>'+
@@ -1326,7 +1396,13 @@ function renderAdmin(){
         '</button>'+
       '</div>'+
     '</aside>'+
-    '<main id="admin-content" class="flex-1 overflow-y-auto"></main>'+
+    '<main class="flex-1 overflow-y-auto">'+
+      '<div class="md:hidden bg-green-900 p-3 flex items-center gap-3 sticky top-0 z-10">'+
+        '<button onclick="toggleAdminSidebar()" class="text-white text-xl p-2 rounded-lg hover:bg-green-800 transition-colors"><i class="fas fa-bars"></i></button>'+
+        '<span class="text-white font-bold text-sm">Agrovel Admin</span>'+
+      '</div>'+
+      '<div id="admin-content" class="admin-content-area p-6"></div>'+
+    '</main>'+
   '</div>';
 }
 
@@ -1486,10 +1562,10 @@ function renderDashboard(){
     {icon:'fa-eye',color:'bg-violet-100 text-violet-700',val:vEv.length,label:'Produtos visualizados',sub:Object.keys(vIds).length+' produtos unicos',chip:''}
   ];
 
-  return'<div class="p-8 fade-in">'+
+  return'<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">'+
-      '<div><h1 class="text-2xl font-bold text-gray-900">Dashboard de Interesse</h1>'+
-        '<p class="text-gray-400 text-sm">Decisoes sobre produtos, marcas e ofertas baseadas em dados reais de navegacao &mdash; '+periodLabel+'</p></div>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Dashboard de Interesse</h1>'+
+        '<p class="text-gray-400 text-xs md:text-sm">Decisoes sobre produtos, marcas e ofertas baseadas em dados reais de navegacao &mdash; '+periodLabel+'</p></div>'+
       '<div class="flex items-center gap-2 flex-wrap">'+
         '<div class="flex bg-gray-100 rounded-xl p-1">'+ranges.map(rangeBut).join('')+'</div>'+
         '<button onclick="resetAnalytics()" title="Zerar dados de analise" class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"><i class="fas fa-trash-alt text-sm"></i></button>'+
@@ -1498,7 +1574,7 @@ function renderDashboard(){
 
     (curI===0?'<div class="mb-6 bg-amber-50 border border-amber-200 text-amber-800 rounded-2xl px-5 py-4 text-sm"><i class="fas fa-info-circle mr-2"></i>Nenhuma interacao no periodo. Navegue pelo site publico (buscas, produtos, WhatsApp) para coletar dados de interesse.</div>':'')+
 
-    '<div class="grid grid-cols-2 lg:grid-cols-4 gap-5 mb-8">'+
+    '<div class="dashboard-cards grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-5 mb-8">'+
       cards.map(function(k){return '<div class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">'+
         '<div class="flex items-center justify-between mb-3"><div class="w-10 h-10 '+k.color+' rounded-xl flex items-center justify-center"><i class="fas '+k.icon+'"></i></div>'+k.chip+'</div>'+
         '<div class="text-2xl font-bold text-gray-900 mb-0.5">'+k.val+'</div>'+
@@ -1507,45 +1583,45 @@ function renderDashboard(){
       '</div>'}).join('')+
     '</div>'+
 
-    '<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">'+
-      '<div class="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-1">Interacoes por dia</h3>'+
+    '<div class="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6 mb-8">'+
+      '<div class="md:col-span-2 bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-1 text-sm md:text-base">Interacoes por dia</h3>'+
         '<p class="text-xs text-gray-400 mb-4">Comparativo com o periodo anterior (identifica tendencia)</p>'+
-        '<div class="h-64"><canvas id="d-daily"></canvas></div>'+
+        '<div class="h-48 md:h-64"><canvas id="d-daily"></canvas></div>'+
       '</div>'+
-      '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-4">O que gera o interesse</h3>'+
-        '<div class="h-64"><canvas id="d-type"></canvas></div>'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-4 text-sm md:text-base">O que gera o interesse</h3>'+
+        '<div class="h-48 md:h-64"><canvas id="d-type"></canvas></div>'+
       '</div>'+
     '</div>'+
 
-    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">'+
-      '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-1">Dias da semana com mais interacao</h3>'+
+    '<div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mb-8">'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-1 text-sm md:text-base">Dias da semana com mais interacao</h3>'+
         '<p class="text-xs text-gray-400 mb-4">Melhor momento para ofertas e publicacoes</p>'+
-        '<div class="h-64"><canvas id="d-dow"></canvas></div>'+
+        '<div class="h-48 md:h-64"><canvas id="d-dow"></canvas></div>'+
       '</div>'+
-      '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-1">Produtos mais visualizados</h3>'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-1 text-sm md:text-base">Produtos mais visualizados</h3>'+
         '<p class="text-xs text-gray-400 mb-4">Views e consultas por produto</p>'+
-        '<div class="h-64"><canvas id="d-prods"></canvas></div>'+
+        '<div class="h-48 md:h-64"><canvas id="d-prods"></canvas></div>'+
       '</div>'+
     '</div>'+
 
-    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">'+
-      '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-1">Marcas de maior interesse</h3>'+
+    '<div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 mb-8">'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-1 text-sm md:text-base">Marcas de maior interesse</h3>'+
         '<p class="text-xs text-gray-400 mb-4">Views, buscas e consultas por marca</p>'+
-        '<div class="h-64"><canvas id="d-brands"></canvas></div>'+
+        '<div class="h-48 md:h-64"><canvas id="d-brands"></canvas></div>'+
       '</div>'+
-      '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-1">Categorias com mais interesse</h3>'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-1 text-sm md:text-base">Categorias com mais interesse</h3>'+
         '<p class="text-xs text-gray-400 mb-4">Onde concentrar esforco de ofertas</p>'+
-        '<div class="h-64"><canvas id="d-cats"></canvas></div>'+
+        '<div class="h-48 md:h-64"><canvas id="d-cats"></canvas></div>'+
       '</div>'+
     '</div>'+
 
-    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">'+
+    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-8">'+
       '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
         '<div class="flex items-center justify-between mb-4"><h3 class="font-bold text-gray-800">Termos de pesquisa mais buscados</h3>'+
         '<span class="text-xs text-gray-400 bg-gray-100 px-2 py-1 rounded-full">'+sEv.length+' buscas</span></div>'+
@@ -1671,12 +1747,12 @@ function renderAdminProducts(){
   const products=DB.products();
   const u=DB.currentUser();
   const canEdit=u.role==='admin'||u.role==='seller';
-  return'<div class="p-8 fade-in">'+
-    '<div class="flex items-center justify-between mb-6">'+
-      '<div><h1 class="text-2xl font-bold text-gray-900">Produtos</h1><p class="text-gray-400 text-sm">'+products.length+' produtos cadastrados</p></div>'+
-      (u.role==='admin'?'<button onclick="startProductForm(null)" class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors flex items-center gap-2"><i class="fas fa-plus"></i>Novo Produto</button>':'')+
+  return'<div class="p-4 md:p-8 fade-in">'+
+    '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Produtos</h1><p class="text-gray-400 text-sm">'+products.length+' produtos cadastrados</p></div>'+
+      (u.role==='admin'?'<button onclick="startProductForm(null)" class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors flex items-center gap-2 text-sm"><i class="fas fa-plus"></i>Novo Produto</button>':'')+
     '</div>'+
-    '<div class="flex gap-3 mb-5">'+
+    '<div class="flex flex-col sm:flex-row gap-3 mb-5">'+
       '<input id="prod-search" type="text" placeholder="Buscar produto..." oninput="filterAdminProducts(this.value)"'+
         'class="flex-1 px-4 py-2.5 border border-gray-200 rounded-xl focus:border-green-500 outline-none">'+
       '<select id="prod-cat-filter" onchange="filterAdminProducts()" class="px-4 py-2.5 border border-gray-200 rounded-xl focus:border-green-500 outline-none bg-white">'+
@@ -1684,8 +1760,8 @@ function renderAdminProducts(){
         getCategories().map(function(c){return '<option>'+c+'</option>'}).join('')+
       '</select>'+
     '</div>'+
-    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">'+
-      '<table class="w-full">'+
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">'+
+      '<table class="w-full min-w-[640px]">'+
         '<thead class="bg-gray-50 border-b border-gray-100">'+
           '<tr><th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Produto</th>'+
           '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">Categoria</th>'+
@@ -1754,13 +1830,13 @@ function startProductForm(id){State.adminSection='product-form';State.editProduc
 function renderAdminCategories(){
   var cats=getCategories();
   var prods=DB.products();
-  return'<div class="p-8 fade-in">'+
+  return'<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex items-center justify-between mb-6">'+
-      '<div><h1 class="text-2xl font-bold text-gray-900">Categorias</h1><p class="text-gray-400 text-sm">'+cats.length+' categorias cadastradas</p></div>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Categorias</h1><p class="text-gray-400 text-sm">'+cats.length+' categorias cadastradas</p></div>'+
     '</div>'+
-    '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-6">'+
+    '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100 mb-6">'+
       '<h3 class="font-bold text-gray-800 mb-4">'+(State.editingCategory?'Editar Categoria':'Nova Categoria')+'</h3>'+
-      '<div class="flex gap-3">'+
+      '<div class="flex flex-col sm:flex-row gap-3">'+
         '<input id="cat-input" type="text" placeholder="Nome da categoria..." value="'+(State.editingCategory||'')+'"'+
           ' class="flex-1 px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none"'+
           ' onkeydown="if(event.key===\'Enter\')saveCategory()">'+
@@ -1770,8 +1846,8 @@ function renderAdminCategories(){
         (State.editingCategory?'<button onclick="cancelEditCategory()" class="px-6 py-3 border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-600 font-medium transition-colors">Cancelar</button>':'')+
       '</div>'+
     '</div>'+
-    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">'+
-      '<table class="w-full">'+
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">'+
+      '<table class="w-full min-w-[400px]">'+
         '<thead class="bg-gray-50 border-b border-gray-100">'+
           '<tr><th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Categoria</th>'+
           '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Produtos</th>'+
@@ -1934,12 +2010,12 @@ function mediaEl(p){
 function renderAdminPromos(){
   var promos=DB.promos();
   function med(p){return mediaEl(p)}
-  return'<div class="p-8 fade-in">'+
-    '<div class="flex items-center justify-between mb-6">'+
-      '<div><h1 class="text-2xl font-bold text-gray-900">Promo\u00e7\u00f5es Pop-up</h1><p class="text-gray-400 text-sm">Crie promo\u00e7\u00f5es com imagem ou v\u00eddeo para aparecer ao abrir a loja. Arquivos enviados s\u00e3o salvos na pasta <span class="font-medium text-gray-500">img/promocoes</span></p></div>'+
+  return'<div class="p-4 md:p-8 fade-in">'+
+    '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Promo\u00e7\u00f5es Pop-up</h1><p class="text-gray-400 text-sm">Crie promo\u00e7\u00f5es com imagem ou v\u00eddeo para aparecer ao abrir a loja. Arquivos enviados s\u00e3o salvos na pasta <span class="font-medium text-gray-500">img/promocoes</span></p></div>'+
     '</div>'+
     (State.editingPromo&&DB.promos().find(function(p){return p.id===State.editingPromo})?'<input type="hidden" id="promo-hidden-id" value="'+State.editingPromo+'">':'')+
-    '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 mb-8">'+
+    '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100 mb-8">'+
       '<div class="flex items-center justify-between mb-5">'+
         '<h3 class="font-bold text-gray-800">'+(State.editingPromo?'Editar Promo\u00e7\u00e3o':'Nova Promo\u00e7\u00e3o')+'</h3>'+
         '<div class="flex items-center gap-3">'+
@@ -1961,21 +2037,21 @@ function renderAdminPromos(){
           '<input type="file" id="promo-image-file" accept="image/*" class="hidden" onchange="handlePromoImageFile(this)">'+
           '<button type="button" onclick="document.getElementById(\'promo-image-file\').click()" class="w-full text-sm bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl border border-green-200 transition-colors"><i class="fas fa-cloud-upload-alt mr-1.5"></i>Enviar imagem do dispositivo</button></div>'+
       '</div>'+
-      '<div class="flex items-center gap-4 mt-5">'+
-        '<button onclick="savePromo()" class="bg-green-600 hover:bg-green-500 text-white font-bold px-6 py-3 rounded-xl transition-colors flex items-center gap-2"><i class="fas fa-save"></i>'+(State.editingPromo?'Salvar Alteracoes':'Cadastrar Promo\u00e7\u00e3o')+'</button>'+
+      '<div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 mt-5">'+
+        '<button onclick="savePromo()" class="bg-green-600 hover:bg-green-500 text-white font-bold px-6 py-3 rounded-xl transition-colors flex items-center justify-center gap-2"><i class="fas fa-save"></i>'+(State.editingPromo?'Salvar Alteracoes':'Cadastrar Promo\u00e7\u00e3o')+'</button>'+
         (State.editingPromo?'<button onclick="cancelEditPromo()" class="px-6 py-3 border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-600 font-medium transition-colors">Cancelar</button>':'')+
       '</div>'+
     '</div>'+
     '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">'+
-      '<div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">'+
+      '<div class="flex items-center justify-between px-4 md:px-6 py-4 border-b border-gray-100">'+
         '<h3 class="font-bold text-gray-800">Hist\u00f3rico de Promo\u00e7\u00f5es</h3>'+
         '<span class="text-xs text-gray-400">'+promos.length+' registr'+((promos.length===1)?'o':'os')+'</span>'+
       '</div>'+
       (promos.length==0?'<div class="p-10 text-center text-gray-400"><div class="text-5xl mb-3"><i class="fas fa-bullhorn"></i></div><p>Nenhuma promo\u00e7\u00e3o cadastrada ainda.</p></div>':'<div class="divide-y divide-gray-50">'+
         promos.map(function(p){
           var badgeAv=p.active? '<span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium"><i class="fas fa-circle text-[8px] mr-1"></i>Ativa</span>':'<span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full font-medium"><i class="fas fa-circle text-[8px] mr-1"></i>Inativa</span>';
-          return'<div class="p-5 flex items-center gap-5 hover:bg-green-50/30 transition-colors">'+
-            '<div class="w-24 flex-shrink-0">'+med(p)+'</div>'+
+          return'<div class="p-4 md:p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-5 hover:bg-green-50/30 transition-colors">'+
+            '<div class="w-full sm:w-24 flex-shrink-0">'+med(p)+'</div>'+
             '<div class="flex-1 min-w-0">'+
               '<div class="flex items-center gap-3 mb-1"><span class="font-bold text-gray-900 truncate">'+(p.title||'Sem titulo')+'</span>'+badgeAv+'</div>'+
               '<p class="text-sm text-gray-500 truncate">'+(p.text||'Sem mensagem')+'</p>'+
@@ -1985,7 +2061,7 @@ function renderAdminPromos(){
                 (p.image?'<span class="bg-gray-50 px-2 py-0.5 rounded-md"><i class="fas fa-image mr-1"></i>Imagem</span>':'')+
               '</div>'+
             '</div>'+
-            '<div class="flex items-center gap-2 flex-shrink-0">'+
+            '<div class="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">'+
               (p.active
                 ?'<button onclick="togglePromoActive(\''+p.id+'\')" class="px-3 py-2 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium transition-colors" title="Desativar"><i class="fas fa-pause mr-1"></i>Desativar</button>'
                 :'<button onclick="togglePromoActive(\''+p.id+'\')" class="px-3 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-500 text-white font-medium transition-colors" title="Ativar"><i class="fas fa-play mr-1"></i>Ativar</button>')+
@@ -2335,15 +2411,15 @@ function toggleImageMode(){
 function renderProductForm(id){
   const p=id?DB.products().find(function(x){return x.id===id}):null;
   function v(key){return p?p[key]||'':''}
-  return'<div class="p-8 fade-in max-w-3xl">'+
+  return'<div class="p-4 md:p-8 fade-in max-w-3xl">'+
     '<div class="flex items-center gap-3 mb-6">'+
       '<button onclick="switchAdminSection(\'products\')" class="text-gray-400 hover:text-gray-700 transition-colors"><i class="fas fa-arrow-left text-lg"></i></button>'+
-      '<div><h1 class="text-2xl font-bold text-gray-900">'+(p?'Editar':'Novo')+' Produto</h1><p class="text-gray-400 text-sm">'+(p?'SKU: '+p.sku:'Preencha os dados do produto')+'</p></div>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">'+(p?'Editar':'Novo')+' Produto</h1><p class="text-gray-400 text-sm">'+(p?'SKU: '+p.sku:'Preencha os dados do produto')+'</p></div>'+
     '</div>'+
     '<form onsubmit="saveProduct(event,\''+(id||'')+'\')" class="space-y-6">'+
-      '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
         '<h3 class="font-bold text-gray-800 mb-4">Informacoes Basicas</h3>'+
-        '<div class="grid grid-cols-2 gap-4">'+
+        '<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">'+
           '<div class="col-span-2"><label class="text-sm text-gray-600 mb-1 block">Nome do Produto *</label>'+
             '<input name="name" required value="'+v('name')+'" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="Ex: Racao Caes Adultos 15kg"></div>'+
           '<div><label class="text-sm text-gray-600 mb-1 block">Categoria *</label>'+
@@ -2454,9 +2530,9 @@ function saveProduct(e,id){
 function renderAdminOrders(){
   const orders=DB.orders();
   const statuses=['todos','pendente','processando','enviado','entregue','cancelado'];
-  return'<div class="p-8 fade-in">'+
-    '<div class="flex items-center justify-between mb-6">'+
-      '<div><h1 class="text-2xl font-bold text-gray-900">Pedidos</h1><p class="text-gray-400 text-sm">'+orders.length+' pedidos no total</p></div>'+
+  return'<div class="p-4 md:p-8 fade-in">'+
+    '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Pedidos</h1><p class="text-gray-400 text-sm">'+orders.length+' pedidos no total</p></div>'+
     '</div>'+
     '<div class="flex gap-2 mb-5 overflow-x-auto pb-2">'+
       statuses.map(function(s){return '<button onclick="filterOrdersByStatus(\''+s+'\')" id="ostatus-'+s+'"'+
@@ -2465,8 +2541,8 @@ function renderAdminOrders(){
         ' <span class="ml-1 text-xs">('+(s==='todos'?orders.length:orders.filter(function(o){return o.status===s}).length)+')</span>'+
       '</button>'}).join('')+
     '</div>'+
-    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">'+
-      '<table class="w-full">'+
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">'+
+      '<table class="w-full min-w-[700px]">'+
         '<thead class="bg-gray-50 border-b border-gray-100">'+
           '<tr><th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Pedido</th>'+
           '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Cliente</th>'+
@@ -2542,12 +2618,12 @@ function viewOrderDetail(id){
 // ============================================================
 function renderAdminCustomers(){
   const customers=DB.customers();
-  return'<div class="p-8 fade-in">'+
+  return'<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex items-center justify-between mb-6">'+
-      '<div><h1 class="text-2xl font-bold text-gray-900">Clientes</h1><p class="text-gray-400 text-sm">'+customers.length+' clientes cadastrados</p></div>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Clientes</h1><p class="text-gray-400 text-sm">'+customers.length+' clientes cadastrados</p></div>'+
     '</div>'+
-    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">'+
-      '<table class="w-full">'+
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">'+
+      '<table class="w-full min-w-[600px]">'+
         '<thead class="bg-gray-50 border-b border-gray-100">'+
           '<tr><th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Cliente</th>'+
           '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Contato</th>'+
@@ -2579,12 +2655,12 @@ function renderCopilotPage(){
   const orders=DB.orders();const products=DB.products();const totalRev=orders.reduce(function(s,o){return s+o.total},0);
   const delivered=orders.filter(function(o){return o.status==='entregue'});
   const topProducts=getTopProducts();
-  return'<div class="p-8 fade-in">'+
-    '<div class="flex items-center justify-between mb-8">'+
-      '<div><h1 class="text-2xl font-bold text-gray-900 flex items-center gap-3"><div class="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white"><i class="fas fa-robot"></i></div>Copilot IA</h1>'+
+  return'<div class="p-4 md:p-8 fade-in">'+
+    '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 sm:mb-8 gap-4">'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900 flex items-center gap-3"><div class="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center text-white"><i class="fas fa-robot"></i></div>Copilot IA</h1>'+
       '<p class="text-gray-400 text-sm mt-1">Gere descricoes e analise o desempenho da loja</p></div>'+
     '</div>'+
-    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">'+
+    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 mb-8">'+
       '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
         '<h3 class="font-bold text-gray-800 mb-1 flex items-center gap-2"><i class="fas fa-magic text-emerald-500"></i>Gerador de Descricoes</h3>'+
         '<p class="text-xs text-gray-400 mb-5">Gere descricoes profissionais para seus produtos agropecuarios</p>'+
@@ -2616,17 +2692,17 @@ function renderCopilotPage(){
         '<button onclick="refreshInsights()" class="mt-4 w-full bg-white/20 hover:bg-white/30 text-white text-xs font-medium py-2.5 rounded-xl transition-colors"><i class="fas fa-sync-alt mr-1.5"></i>Atualizar Analise</button>'+
       '</div>'+
     '</div>'+
-    '<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">'+
-      '<div class="lg:col-span-2 bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-4">Evolucao de Receita - Ultimos 6 Meses</h3>'+
-        '<canvas id="copilot-rev-chart" height="90"></canvas>'+
+    '<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 md:gap-6 mb-6 md:mb-8">'+
+      '<div class="lg:col-span-2 bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-4 text-sm md:text-base">Evolucao de Receita - Ultimos 6 Meses</h3>'+
+        '<div class="h-48 md:h-auto"><canvas id="copilot-rev-chart" height="90"></canvas></div>'+
       '</div>'+
-      '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
-        '<h3 class="font-bold text-gray-800 mb-4">Receita por Categoria</h3>'+
-        '<canvas id="cat-chart" height="180"></canvas>'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-4 text-sm md:text-base">Receita por Categoria</h3>'+
+        '<div class="h-48 md:h-auto"><canvas id="cat-chart" height="180"></canvas></div>'+
       '</div>'+
     '</div>'+
-    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">'+
+    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">'+
       '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
         '<h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-trophy text-amber-500 mr-2"></i>Top Produtos por Receita</h3>'+
         '<div class="space-y-3">'+
