@@ -305,7 +305,7 @@ const DEFAULT_ORDERS = [
 const DB = (function(){
   const mem = {};                       // cache em memoria (espelho)
   const fire = { db: null };            // instancia do Firestore
-  const COLL = ['products','orders','customers','users','categories','promos','events','cart','filters'];
+  const COLL = ['products','orders','customers','users','categories','promos','events','cart','filters','currentUser'];
   const pending = {};
   const timers = {};
 
@@ -396,7 +396,7 @@ const DB = (function(){
     cart(){return this.g('cart')||[]},
     setCart(v){ mem['cart']=v; persist('cart'); return true; },
     currentUser(){return this.g('currentUser')},
-    setCurrentUser(v){ mem['currentUser']=v; return true; },
+    setCurrentUser(v){ mem['currentUser']=v; persist('currentUser'); return true; },
     filters(){return this.g('filters')||{category:'',species:'',brand:'',search:'',sort:'featured'}},
     setFilters(v){ mem['filters']=v; persist('filters'); return true; },
     promos(){return this.g('promos')||[]},
