@@ -114,7 +114,7 @@
 <div id="toast" style="opacity:0"></div>
 
 <!-- WHATSAPP FLOAT -->
-<a href="https://wa.me/5511999998888?text=Ola!%20Gostaria%20de%20saber%20mais%20sobre%20os%20produtos"
+<a href="#" onclick="window.open(getWhatsAppLink('Ola! Gostaria de saber mais sobre os produtos'),'_blank');return false"
    target="_blank" class="whatsapp-float" title="Fale conosco pelo WhatsApp">
   <i class="fab fa-whatsapp"></i>
 </a>
@@ -165,10 +165,10 @@
           <span id="header-cat-nav"></span>
         </nav>
         <div class="flex items-center gap-2 md:gap-3">
-          <button onclick="window.open('https://wa.me/5511999998888?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20produtos%20do%20cat%C3%A1logo','_blank')" class="text-sm bg-amber-500 hover:bg-amber-400 text-white px-3 md:px-4 py-2 rounded-lg transition-colors font-medium header-btn-text">
+          <button onclick="window.open(getWhatsAppLink('Ol%C3%A1!%20Gostaria%20de%20consultar%20produtos%20do%20cat%C3%A1logo'),'_blank')" class="text-sm bg-amber-500 hover:bg-amber-400 text-white px-3 md:px-4 py-2 rounded-lg transition-colors font-medium header-btn-text">
             <i class="fab fa-whatsapp mr-1.5"></i>Falar com vendedor
           </button>
-          <button onclick="window.open('https://wa.me/5511999998888?text=Ol%C3%A1!%20Gostaria%20de%20consultar%20produtos%20do%20cat%C3%A1logo','_blank')" class="md:hidden bg-amber-500 hover:bg-amber-400 text-white w-10 h-10 rounded-lg transition-colors flex items-center justify-center">
+          <button onclick="window.open(getWhatsAppLink('Ol%C3%A1!%20Gostaria%20de%20consultar%20produtos%20do%20cat%C3%A1logo'),'_blank')" class="md:hidden bg-amber-500 hover:bg-amber-400 text-white w-10 h-10 rounded-lg transition-colors flex items-center justify-center">
             <i class="fab fa-whatsapp"></i>
           </button>
           <div id="user-menu" class="flex items-center gap-2"></div>
@@ -934,14 +934,14 @@ function submitContactForm(){
   if(!name||!phone){showToast('Preencha seu nome e telefone','warn');return;}
   trackEvent('contact',{name:name,phone:phone,interest:interest||''});
   const body='Olá! Gostaria de receber atendimento sobre '+(interest||'produtos do catálogo')+'. Nome: '+name+'; Telefone: '+phone+'; Mensagem: '+(message||'Quero conversar com um vendedor.');
-  window.open('https://wa.me/5511999998888?text='+encodeURIComponent(body),'_blank');
+  window.open(getWhatsAppLink(body),'_blank');
 }
 function orderWhatsApp(pid){
   const p=DB.products().find(function(x){return x.id===pid});
   if(!p)return;
   trackEvent('whatsapp',{productId:p.id,name:p.name,brand:p.brand||'',category:p.category});
   const msg='Olá! Gostaria de consultar o produto '+p.name+' (Cód: '+p.sku+'). Pode me passar mais informações e condições?';
-  window.open('https://wa.me/5511999998888?text='+encodeURIComponent(msg),'_blank');
+  window.open(getWhatsAppLink(msg),'_blank');
 }
 
 // ============================================================
@@ -990,7 +990,7 @@ function renderProductDetail(id){
           '<p class="text-sm text-gray-600 mb-4">Entre em contato com um vendedor e informe o código do produto para receber orientaçao comercial personalizada.</p>'+
           '<div class="flex flex-wrap gap-3">'+
             '<button onclick="orderWhatsApp(\''+p.id+'\')" class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2.5 rounded-xl transition-all"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</button>'+
-            '<button onclick="window.open(\'https://wa.me/5511999998888?text=Ol%C3%A1!%20Quero%20consultar%20o%20produto%20'+p.sku+'\',\'_blank\')" class="border border-green-300 text-green-700 hover:bg-green-100 px-4 py-2.5 rounded-xl transition-all">Enviar referência</button>'+
+            '<button onclick="window.open(getWhatsAppLink(\'Ol%C3%A1!%20Quero%20consultar%20o%20produto%20'+p.sku+'\'),\'_blank\')" class="border border-green-300 text-green-700 hover:bg-green-100 px-4 py-2.5 rounded-xl transition-all">Enviar referência</button>'+
           '</div>'+
         '</div>'+
         '<p class="text-gray-600 leading-relaxed mb-4">'+p.description+'</p>'+
@@ -1373,6 +1373,7 @@ function renderAdmin(){
     {id:'categories',icon:'fa-tags',label:'Categorias',role:'admin'},
     {id:'promos',icon:'fa-bullhorn',label:'Promo\u00e7\u00f5es',role:'admin'},
     {id:'copilot',icon:'fa-robot',label:'Copilot IA',role:'admin'},
+    {id:'whatsapp',icon:'fab fa-whatsapp',label:'WhatsApp',role:'admin'},
   ].filter(function(n){return n.role==='both'||(isAdm&&n.role==='admin')||(isSel&&n.role==='both')});
   return'<div class="flex h-screen bg-gray-50" id="admin-wrap">'+
     '<div class="admin-mobile-overlay" onclick="closeAdminSidebar()"></div>'+
@@ -1410,6 +1411,87 @@ function renderAdmin(){
   '</div>';
 }
 
+function getWhatsAppNumber(){
+  var n=DB.g('whatsappNumber');
+  return(n||'').replace(/\D/g,'')||'5511999998888';
+}
+
+function getWhatsAppLink(msg){
+  return'https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent(msg||'');
+}
+
+function renderAdminWhatsApp(){
+  var current=getWhatsAppNumber();
+  var ddd=current.slice(2,4);
+  var num=current.slice(4);
+  var country=current.slice(0,2);
+  return'<div class="p-4 md:p-8 fade-in max-w-2xl">'+
+    '<div class="flex items-center gap-3 mb-6">'+
+      '<button onclick="switchAdminSection(\'dashboard\')" class="text-gray-400 hover:text-gray-700 transition-colors"><i class="fas fa-arrow-left text-lg"></i></button>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900 flex items-center gap-2"><i class="fab fa-whatsapp text-green-500"></i> WhatsApp</h1>'+
+      '<p class="text-gray-400 text-sm">Configure o numero que recebe as mensagens dos clientes</p></div>'+
+    '</div>'+
+    '<div class="bg-white rounded-2xl p-5 md:p-6 shadow-sm border border-green-100 mb-6">'+
+      '<h3 class="font-bold text-gray-800 mb-4">Numero atual</h3>'+
+      '<div class="flex items-center gap-3 p-4 bg-green-50 rounded-xl border border-green-200 mb-4">'+
+        '<i class="fab fa-whatsapp text-green-600 text-xl"></i>'+
+        '<div>'+
+          '<div class="text-lg font-bold text-green-700">'+current.replace(/^(\d{2})(\d{2})(\d+)$/,'($2) $3')+'</div>'+
+          '<div class="text-xs text-gray-500">Formato: '+country+' (DDD) numero</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+    '<div class="bg-white rounded-2xl p-5 md:p-6 shadow-sm border border-green-100 mb-6">'+
+      '<h3 class="font-bold text-gray-800 mb-4">Alterar numero</h3>'+
+      '<p class="text-sm text-gray-500 mb-4">Informe o numero completo com codigo do pais (55), DDD e numero.</p>'+
+      '<div class="space-y-4">'+
+        '<div>'+
+          '<label class="text-sm text-gray-600 mb-1.5 block">Codigo do Pais</label>'+
+          '<input id="wa-country" type="number" value="'+country+'" maxlength="2"'+
+            ' class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none"'+
+            ' placeholder="55" oninput="previewWhatsApp()">'+
+        '</div>'+
+        '<div>'+
+          '<label class="text-sm text-gray-600 mb-1.5 block">DDD</label>'+
+          '<input id="wa-ddd" type="number" value="'+ddd+'" maxlength="2"'+
+            ' class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none"'+
+            ' placeholder="11" oninput="previewWhatsApp()">'+
+        '</div>'+
+        '<div>'+
+          '<label class="text-sm text-gray-600 mb-1.5 block">Numero (com 9 digitos)</label>'+
+          '<input id="wa-number" type="number" value="'+num+'" maxlength="9"'+
+            ' class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none"'+
+            ' placeholder="999998888" oninput="previewWhatsApp()">'+
+        '</div>'+
+        '<div id="wa-preview" class="p-3 bg-gray-50 rounded-xl text-sm text-gray-600">'+
+          'Preview: <span class="font-mono font-bold text-green-700">'+current+'</span>'+
+        '</div>'+
+        '<button onclick="saveWhatsAppNumber()" class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3.5 rounded-xl transition-all hover:shadow-lg flex items-center justify-center gap-2"><i class="fas fa-save"></i>Salvar Numero</button>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
+function previewWhatsApp(){
+  var c=(document.getElementById('wa-country').value||'').replace(/\D/g,'');
+  var d=(document.getElementById('wa-ddd').value||'').replace(/\D/g,'');
+  var n=(document.getElementById('wa-number').value||'').replace(/\D/g,'');
+  var full=c+d+n;
+  var el=document.getElementById('wa-preview');
+  if(el) el.innerHTML='Preview: <span class="font-mono font-bold text-green-700">'+(full||'Incomplete')+'</span>';
+}
+
+function saveWhatsAppNumber(){
+  var c=(document.getElementById('wa-country').value||'').replace(/\D/g,'');
+  var d=(document.getElementById('wa-ddd').value||'').replace(/\D/g,'');
+  var n=(document.getElementById('wa-number').value||'').replace(/\D/g,'');
+  var full=c+d+n;
+  if(full.length<10){showToast('Informe um numero valido (pais + DDD + numero)','warn');return}
+  DB.s('whatsappNumber',full);
+  showToast('Numero do WhatsApp atualizado com sucesso!');
+  renderAdminSection();
+}
+
 function renderAdminSection(){
   const el=document.getElementById('admin-content');
   if(!el) return;
@@ -1422,6 +1504,7 @@ function renderAdminSection(){
     case 'categories':el.innerHTML=renderAdminCategories();break;
     case 'promos':el.innerHTML=renderAdminPromos();initPromoForm();resolveIdbMedia(el);break;
     case 'copilot':el.innerHTML=renderCopilotPage();initCopilotChart();break;
+    case 'whatsapp':el.innerHTML=renderAdminWhatsApp();break;
   }
   document.querySelectorAll('.admin-link').forEach(function(el){
     const key=el.id?el.id.replace('nav-',''):'';
