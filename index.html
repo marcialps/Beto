@@ -199,7 +199,7 @@
         <div class="text-white font-semibold mb-3">Informações</div>
         <ul class="space-y-1 text-sm">
           <li>Frete a negociar</li>
-          <li>Entrega em todo Brasil</li>
+          <li>Mais de 12.000 produtos</li>
           <li>Produtos com garantia</li>
           <li>Assistencia veterinaria</li>
         </ul>
@@ -207,11 +207,16 @@
       <div>
         <div class="text-white font-semibold mb-3">Contato</div>
         <ul class="space-y-1 text-sm">
-          <li><i class="fas fa-envelope mr-2"></i>contato@agrovel.com.br</li>
+          
+          <li><i class="fas fa-envelope mr-2"></i>nfe@agrovel.agr.br</li>
+          <li><i class="fas fa-envelope mr-2"></i>financeiro@agrovel.agr.br</li>
+          <li><i class="fas fa-envelope mr-2"></i>vendas@agrovel.agr.br</li>
+          <li><i class="fas fa-envelope mr-2"></i>pedidos@agrovel.agr.br</li>
+          <li><i class="fas fa-envelope mr-2"></i>administracao@agrovel.agr.br</li>
           <li><i class="fas fa-phone mr-2"></i>(55) 3332-4124</li>
           <li><i class="fab fa-instagram mr-2"></i>@agrovelagroveterinaria</li>
-          <li><i class="fab fa-whatsapp mr-2"></i>(55) 99999-8888</li>
-          <li><i class="fas fa-map-marker-alt mr-2"></i>Av. 21 de Abril, 1004 - Centro, Ijuí - RS</li>
+          <li><i class="fab fa-whatsapp mr-2"></i>(55) 99109-5001</li>
+          <li><i class="fas fa-map-marker-alt mr-2"></i>Av. 21 de Abril, 1004 - Bairro Osvaldo Aranha, Ijuí - RS</li>
         </ul>
       </div>
     </div>
@@ -865,15 +870,15 @@ function renderCatalog(){
         '<p class="text-gray-600 leading-relaxed mb-6">Nossa equipe atende por WhatsApp, telefone e e-mail para orientar sobre disponibilidade, referências, categorias e condições comerciais para o seu negócio.</p>'+ 
         '<div class="grid grid-cols-1 sm:grid-cols-3 gap-3">'+
           '<div class="rounded-2xl bg-green-50 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">WhatsApp</div><div class="text-sm text-gray-700">Resposta rápida para consultar itens e referências</div></div>'+ 
-          '<div class="rounded-2xl bg-green-50 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">Telefone</div><div class="text-sm text-gray-700">(55) 99999-8888</div></div>'+ 
-          '<div class="rounded-2xl bg-green-50 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">E-mail</div><div class="text-sm text-gray-700">contato@agrovel.com.br</div></div>'+ 
+          '<div class="rounded-2xl bg-green-50 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">Telefone</div><div class="text-sm text-gray-700">(55) 99109-5001</div></div>'+ 
+          '<div class="rounded-2xl bg-green-50 p-4"><div class="text-xs font-semibold uppercase tracking-wide text-green-700 mb-2">E-mail</div><div class="text-sm text-gray-700">administracao@agrovel.agr.br</div></div>'+ 
         '</div>'+ 
       '</div>'+ 
       '<form onsubmit="event.preventDefault();submitContactForm();" class="rounded-2xl border border-green-100 bg-green-50 p-5">'+ 
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Seu nome</label>'+ 
         '<input id="contact-name" type="text" required class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="Digite seu nome">'+ 
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Telefone</label>'+ 
-        '<input id="contact-phone" type="tel" required class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="(55) 99999-8888">'+ 
+        '<input id="contact-phone" type="tel" required class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="(55) 99109-5001">'+ 
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Interesse</label>'+ 
         '<input id="contact-interest" type="text" class="w-full px-4 py-3 rounded-xl border border-green-200 bg-white mb-3" placeholder="Ex.: ração, vacina, equipamento...">'+ 
         '<label class="block text-sm font-semibold text-gray-700 mb-2">Mensagem</label>'+ 
@@ -981,7 +986,6 @@ function renderProductDetail(id){
           '<p class="text-sm text-gray-600 mb-4">Entre em contato com um vendedor e informe o código do produto para receber orientaçao comercial personalizada.</p>'+
           '<div class="flex flex-wrap gap-3">'+
             '<button onclick="orderWhatsApp(\''+p.id+'\')" class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2.5 rounded-xl transition-all"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</button>'+
-            '<button onclick="window.open(getWhatsAppLink(\'Ol%C3%A1!%20Quero%20consultar%20o%20produto%20'+p.sku+'\'),\'_blank\')" class="border border-green-300 text-green-700 hover:bg-green-100 px-4 py-2.5 rounded-xl transition-all">Enviar referência</button>'+
           '</div>'+
         '</div>'+
         '<p class="text-gray-600 leading-relaxed mb-4">'+p.description+'</p>'+
@@ -997,11 +1001,6 @@ function renderProductDetail(id){
           '<button onclick="orderWhatsApp(\''+p.id+'\')" class="flex-1 min-w-[220px] bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:shadow-lg text-lg">'+
             '<i class="fab fa-whatsapp mr-2"></i>Falar com um vendedor'+
           '</button>'+
-        '</div>'+
-        '<div class="grid grid-cols-3 gap-4 p-4 bg-green-50 rounded-xl mb-6">'+
-          '<div class="text-center text-xs text-gray-600"><i class="fas fa-shipping-fast text-green-500 text-lg mb-1 block"></i>Frete Gratis<br>acima de R$ 300</div>'+
-          '<div class="text-center text-xs text-gray-600"><i class="fas fa-undo text-green-500 text-lg mb-1 block"></i>Troca<br>em 30 dias</div>'+
-          '<div class="text-center text-xs text-gray-600"><i class="fas fa-shield-alt text-green-500 text-lg mb-1 block"></i>Pagamento<br>Seguro</div>'+
         '</div>'+
         (p.techInfo?'<div class="bg-gray-50 border border-gray-200 rounded-xl p-4">'+
           '<h4 class="font-semibold text-gray-700 text-sm mb-2"><i class="fas fa-clipboard-list text-green-500 mr-2"></i>Ficha Tecnica</h4>'+
@@ -1173,7 +1172,7 @@ function renderCheckout(){
               '<div><label class="text-sm text-gray-600 mb-1 block">E-mail *</label>'+
                 '<input name="email" type="email" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="seu@email.com"></div>'+
               '<div><label class="text-sm text-gray-600 mb-1 block">Telefone *</label>'+
-                '<input name="phone" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="(11) 99999-9999"></div>'+
+                '<input name="phone" required class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="(55) 99109-5001"></div>'+
             '</div>'+
           '</div>'+
           '<div class="bg-white rounded-2xl p-6 shadow-sm border border-green-100">'+
@@ -1404,7 +1403,7 @@ function renderAdmin(){
 
 function getWhatsAppNumber(){
   var n=DB.g('whatsappNumber');
-  return(n||'').replace(/\D/g,'')||'5511999998888';
+  return(n||'').replace(/\D/g,'')||'5555991095001';
 }
 
 function getWhatsAppLink(msg){
@@ -1452,7 +1451,7 @@ function renderAdminWhatsApp(){
           '<label class="text-sm text-gray-600 mb-1.5 block">Numero (com 9 digitos)</label>'+
           '<input id="wa-number" type="number" value="'+num+'" maxlength="9"'+
             ' class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none"'+
-            ' placeholder="999998888" oninput="previewWhatsApp()">'+
+            ' placeholder="991095001" oninput="previewWhatsApp()">'+
         '</div>'+
         '<div id="wa-preview" class="p-3 bg-gray-50 rounded-xl text-sm text-gray-600">'+
           'Preview: <span class="font-mono font-bold text-green-700">'+current+'</span>'+
