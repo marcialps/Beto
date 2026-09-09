@@ -74,15 +74,18 @@
   .img-chip:hover .del-chip{opacity:1}
   .img-chip.primary{border-color:#16a34a}
   .admin-mobile-overlay{display:none}
+  @media(min-width:769px){
+    .admin-sidebar{position:relative!important;transform:none!important;width:16rem!important;display:flex!important}
+  }
   @media(max-width:768px){
     #toast{bottom:80px;right:12px}
     #cart-sidebar,#copilot-panel{width:100%!important;max-width:100%!important}
     #mobile-menu{max-height:0;overflow:hidden;transition:max-height .3s ease}
     #mobile-menu.open{max-height:400px}
-    .admin-sidebar{position:fixed;left:0;top:0;z-index:60;transform:translateX(-100%);transition:transform .3s ease;width:280px!important}
-    .admin-sidebar.open{transform:translateX(0)}
-    .admin-mobile-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:55;display:none}
-    .admin-mobile-overlay.show{display:block}
+    .admin-sidebar{position:fixed!important;left:0;top:0;bottom:0;z-index:60;transform:translateX(-100%);transition:transform .3s ease;width:280px!important;display:none!important}
+    .admin-sidebar.open{transform:translateX(0);display:flex!important}
+    .admin-mobile-overlay{display:none}
+    .admin-mobile-overlay.show{display:block;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:55}
     .carousel-arrow{width:36px;height:36px;font-size:14px}
     .carousel-arrow.prev{left:8px}
     .carousel-arrow.next{right:8px}
@@ -302,7 +305,7 @@ const DEFAULT_ORDERS = [
 const DB = (function(){
   const mem = {};                       // cache em memoria (espelho)
   const fire = { db: null };            // instancia do Firestore
-  const COLL = ['products','orders','customers','users','categories','promos','events','cart','filters','currentUser'];
+  const COLL = ['products','orders','customers','users','categories','promos','events','cart','filters'];
   const pending = {};
   const timers = {};
 
@@ -393,7 +396,7 @@ const DB = (function(){
     cart(){return this.g('cart')||[]},
     setCart(v){ mem['cart']=v; persist('cart'); return true; },
     currentUser(){return this.g('currentUser')},
-    setCurrentUser(v){ mem['currentUser']=v; persist('currentUser'); return true; },
+    setCurrentUser(v){ mem['currentUser']=v; return true; },
     filters(){return this.g('filters')||{category:'',species:'',brand:'',search:'',sort:'featured'}},
     setFilters(v){ mem['filters']=v; persist('filters'); return true; },
     promos(){return this.g('promos')||[]},
@@ -1373,7 +1376,7 @@ function renderAdmin(){
   ].filter(function(n){return n.role==='both'||(isAdm&&n.role==='admin')||(isSel&&n.role==='both')});
   return'<div class="flex h-screen bg-gray-50" id="admin-wrap">'+
     '<div class="admin-mobile-overlay" onclick="closeAdminSidebar()"></div>'+
-    '<aside class="admin-sidebar w-64 bg-green-900 flex flex-col flex-shrink-0 h-screen sticky top-0">'+
+    '<aside class="admin-sidebar w-64 bg-green-900 flex flex-col flex-shrink-0 h-screen">'+
       '<div class="p-5 border-b border-green-800 flex items-center justify-between">'+
           '<button onclick="navigate(\'catalog\')" class="flex items-center gap-3 text-white hover:opacity-80 transition-opacity">'+
           '<img src="img/logo.gif" alt="Agrovel" class="h-9 w-auto">'+
