@@ -73,6 +73,12 @@
   .img-chip .del-chip{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(220,38,38,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;opacity:0;transition:opacity .2s}
   .img-chip:hover .del-chip{opacity:1}
   .img-chip.primary{border-color:#16a34a}
+  .img-chip.selected{border-color:#16a34a;box-shadow:0 0 0 3px rgba(22,163,74,.28)}
+  .chip-marker{position:absolute;left:50%;top:50%;width:12px;height:12px;margin:-6px 0 0 -6px;border-radius:9999px;background:rgba(22,163,74,.85);border:2px solid #fff;box-shadow:0 0 0 2px rgba(22,163,74,.35);pointer-events:none;z-index:2}
+  .img-contain{width:100%;height:100%;object-fit:contain;object-position:center;display:block}
+  .img-cover{width:100%;height:100%;object-fit:cover;display:block}
+  .img-cover-hover{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s ease}
+  .group:hover .img-cover-hover{transform:scale(1.05)}
   .admin-mobile-overlay{display:none}
   @media(min-width:769px){
     .admin-sidebar{position:relative!important;transform:none!important;width:16rem!important;display:flex!important}
@@ -647,6 +653,52 @@ function featFormatPrice(v){
   return'R$ '+v.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
+// FOCAL POINT: area de interesse da foto (percentuais x/y alinhados a p.images)
+function focalOf(p,i){
+  var f=(p&&p.focalPoints&&p.focalPoints[i]);
+  return (f&&typeof f.x==='number'&&typeof f.y==='number'&&f.x>=0&&f.x<=100&&f.y>=0&&f.y<=100)?f:null;
+}
+function imgFocal(p,i){
+  var f=focalOf(p,i);
+  return f?'object-position:'+f.x+'% '+f.y+'%;':'';
+}
+function cartFocal(item){
+  var p=DB.products().find(function(x){return x.id===item.productId});
+  return imgFocal(p,0);
+}
+
+// ADAPTIVE IMAGE SYSTEM
+// sem focal point → object-contain (mostra imagem inteira, centralizada)
+// com focal point → object-cover (corte escolhido pelo admin)
+function _padStr(px){return 'padding:'+px+';';}
+function imgFrame(src,p,i,opts){
+  opts=opts||{};
+  var f=focalOf(p,i);
+  var useCover=!!(f&&opts.cover!==false);
+  var pad=opts.pad!==undefined?opts.pad:'5%';
+  var mainStyle=useCover?'object-position:'+f.x+'% '+f.y+'%;':_padStr(pad);
+  var mainCls=useCover?'img-cover':'img-contain';
+  var extra=opts.extra||'';
+  if(opts.hover) extra+=' group-hover:scale-105 transition-transform duration-500';
+  return '<img src="'+src+'" alt="'+(opts.alt||'')+'" style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
+}
+
+function thumbImg(src,p,i,alt){
+  var f=focalOf(p,i);
+  var style=f?'object-position:'+f.x+'% '+f.y+'%':'';
+  var cls=f?'img-cover':'img-contain';
+  return '<img src="'+src+'" alt="'+alt+'" style="'+style+'" class="'+cls+'">';
+}
+
+function cartImg(item){
+  var p=DB.products().find(function(x){return x.id===item.productId});
+  var f=focalOf(p,0);
+  var src=item.image||(p&&p.images&&p.images[0])||'';
+  var style=f?'object-position:'+f.x+'% '+f.y+'%':'padding:3px';
+  var cls=f?'object-cover w-full h-full':'object-contain w-full h-full';
+  return '<img src="'+src+'" alt="" style="'+style+'" class="'+cls+'">';
+}
+
 function renderFeaturedCarousel(featured){
   featCarouselIndex=0;
   featCarouselLength=featured.length;
@@ -665,8 +717,8 @@ function renderFeaturedCarousel(featured){
     var discount=(p.oldPrice&&p.oldPrice>p.price)?Math.round((1-p.price/p.oldPrice)*100):0;
     return'<div class="carousel-slide" data-slide="'+i+'">'+
       '<div class="carousel-slide-inner cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
-        '<div class="relative h-[480px] md:h-[520px] overflow-hidden rounded-3xl shadow-2xl">'+
-          '<img src="'+p.images[0]+'" alt="'+p.name+'" class="absolute inset-0 w-full h-full object-cover transition-transform duration-[1200ms] group-hover:scale-110">'+
+        '<div class="relative h-[480px] md:h-[520px] overflow-hidden rounded-3xl shadow-2xl bg-white">'+
+          imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'4%'})+
           '<div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/10"></div>'+
           '<div class="absolute inset-x-0 bottom-0 p-7 md:p-10">'+
             '<div class="flex flex-wrap items-center gap-2 mb-3">'+
@@ -892,8 +944,8 @@ function renderCatalog(){
 
 function renderProductCard(p){
   return'<div class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
-    '<div class="relative overflow-hidden h-52">'+
-      '<img src="'+p.images[0]+'" alt="'+p.name+'" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">'+
+    '<div class="relative overflow-hidden h-52 bg-white">'+
+      imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'6%'})+
       (p.featured?'<div class="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-star mr-1"></i>Destaque</div>':'')+
       (p.prescription?'<div class="absolute bottom-3 right-3 bg-amber-500/90 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-prescription mr-1"></i>Receita</div>':'')+
       '<div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">'+
@@ -954,6 +1006,7 @@ function renderProductDetail(id){
   trackEvent('product_view',{productId:p.id,name:p.name,brand:p.brand||'',category:p.category});
   const discount=p.originalPrice?Math.round((1-p.price/p.originalPrice)*100):0;
   const related=DB.products().filter(function(x){return x.active&&x.category===p.category&&x.id!==p.id}).slice(0,4);
+  const mf=focalOf(p,0);
   return'<div class="max-w-7xl mx-auto px-4 py-6 md:py-10 fade-in">'+
     '<nav class="text-xs md:text-sm text-gray-500 mb-4 md:mb-6 flex items-center gap-2 flex-wrap">'+
       '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">Inicio</button>'+
@@ -964,12 +1017,12 @@ function renderProductDetail(id){
     '</nav>'+
     '<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12 mb-12 md:mb-16">'+
       '<div>'+
-        '<div class="rounded-2xl overflow-hidden aspect-square mb-4 bg-gray-100">'+
-          '<img id="main-img" src="'+p.images[0]+'" alt="'+p.name+'" class="w-full h-full object-cover">'+
+        '<div class="relative rounded-2xl overflow-hidden aspect-square mb-4 bg-white">'+
+          '<img id="main-img" src="'+p.images[0]+'" alt="'+p.name+'" style="'+(mf?'object-position:'+mf.x+'% '+mf.y+'%;':'padding:5%;')+'" class="'+(mf?'img-cover':'img-contain')+'">'+
         '</div>'+
-        '<div class="flex gap-3">'+
-          p.images.map(function(img,i){return '<button onclick="document.getElementById(\'main-img\').src=\''+img+'\'" class="w-20 h-20 rounded-xl overflow-hidden border-2 border-green-200 hover:border-green-500 transition-colors">'+
-            '<img src="'+img+'" class="w-full h-full object-cover" alt="Foto '+(i+1)+'">'+
+        '<div class="flex gap-3" id="main-thumbs">'+
+          p.images.map(function(img,i){return '<button onclick="setMainImage(\''+p.id+'\','+i+')" class="w-20 h-20 rounded-xl overflow-hidden border-2 transition-colors bg-gray-100 '+(i===0?'border-green-500':'border-green-200')+'">'+
+            thumbImg(img,p,i,'Foto '+(i+1))+
           '</button>'}).join('')+
         '</div>'+
       '</div>'+
@@ -1014,6 +1067,22 @@ function renderProductDetail(id){
   '</div>';
 }
 function adjustQty(d){const i=document.getElementById('qty-input');i.value=Math.max(1,+i.value+d)}
+function setMainImage(id,i){
+  const p=DB.products().find(function(x){return x.id===id});
+  if(!p||!p.images[i]) return;
+  const src=p.images[i];
+  const img=document.getElementById('main-img');
+  const f=focalOf(p,i);
+  if(img){
+    img.src=src;
+    img.style.objectPosition=f?f.x+'% '+f.y+'%':'';
+    img.style.padding=f?'':'5%';
+    img.className=f?'img-cover':'img-contain';
+  }
+  document.querySelectorAll('#main-thumbs button').forEach(function(b,k){
+    b.className='w-20 h-20 rounded-xl overflow-hidden border-2 transition-colors bg-gray-100 '+(k===i?'border-green-500':'border-green-200');
+  });
+}
 function addToCartQty(id){orderWhatsApp(id);showToast('Produto encaminhado para conversa no WhatsApp.','info')}
 
 // ============================================================
@@ -1080,7 +1149,7 @@ function renderCartSidebar(){
   const subtotal=cart.reduce(function(s,x){return s+x.price*x.qty},0);
   const shipping=subtotal>=300?0:20;
   el.innerHTML=cart.map(function(item){return '<div class="flex gap-3 p-3 bg-green-50 rounded-xl mb-3">'+
-    '<img src="'+item.image+'" class="w-20 h-20 rounded-lg object-cover flex-shrink-0">'+
+    '<div class="w-20 h-20 rounded-lg overflow-hidden bg-white flex-shrink-0">'+cartImg(item)+'</div>'+
     '<div class="flex-1 min-w-0">'+
      '<p class="text-sm font-semibold text-gray-800 leading-tight line-clamp-2 mb-1">'+item.name+'</p>'+
      '<p class="text-green-700 font-bold text-sm">'+fmt(item.price)+'</p>'+
@@ -1115,7 +1184,7 @@ function renderCartPage(){
     '<div class="grid grid-cols-1 lg:grid-cols-3 gap-6 md:gap-8">'+
       '<div class="lg:col-span-2 space-y-4">'+
         cart.map(function(item){return '<div class="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-green-100 flex gap-3 md:gap-5">'+
-          '<img src="'+item.image+'" class="w-20 h-20 md:w-28 md:h-28 rounded-xl object-cover flex-shrink-0 cursor-pointer" onclick="navigate(\'product\',{productId:\''+item.productId+'\'})">'+
+          '<div class="w-20 h-20 md:w-28 md:h-28 rounded-xl overflow-hidden bg-white flex-shrink-0 cursor-pointer" onclick="navigate(\'product\',{productId:\''+item.productId+'\'})">'+cartImg(item)+'</div>'+
           '<div class="flex-1">'+
             '<h3 class="font-semibold text-gray-800 mb-1 hover:text-green-700 cursor-pointer" onclick="navigate(\'product\',{productId:\''+item.productId+'\'})">'+item.name+'</h3>'+
             '<p class="text-green-700 font-bold text-lg mb-3">'+fmt(item.price)+'</p>'+
@@ -1215,7 +1284,7 @@ function renderCheckout(){
           '<h3 class="font-bold text-gray-800 mb-4">Seu Pedido</h3>'+
           '<div class="space-y-3 mb-4">'+
             cart.map(function(item){return '<div class="flex gap-3 items-center">'+
-              '<img src="'+item.image+'" class="w-12 h-12 rounded-lg object-cover">'+
+              '<div class="w-12 h-12 rounded-lg overflow-hidden bg-white flex-shrink-0">'+cartImg(item)+'</div>'+
               '<div class="flex-1 min-w-0"><p class="text-sm font-medium text-gray-800 line-clamp-1">'+item.name+'</p><p class="text-xs text-gray-400">Qtd: '+item.qty+'</p></div>'+
               '<span class="text-sm font-bold text-gray-700">'+fmt(item.price*item.qty)+'</span>'+
             '</div>'}).join('')+
@@ -1842,7 +1911,7 @@ function renderAdminProducts(){
         '<tbody id="products-tbody">'+
           products.map(function(p){return '<tr class="border-b border-gray-50 hover:bg-green-50/30 transition-colors" data-name="'+p.name.toLowerCase()+'" data-category="'+p.category+'">'+
             '<td class="px-5 py-4"><div class="flex items-center gap-3">'+
-              '<img src="'+p.images[0]+'" class="w-12 h-12 rounded-xl object-cover flex-shrink-0">'+
+              '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(p.images[0],p,0,p.name)+'</div>'+
               '<div><div class="font-medium text-gray-900 text-sm">'+p.name+'</div><div class="text-xs text-gray-400">SKU: '+p.sku+'</div></div></div></td>'+
             '<td class="px-5 py-4"><span class="text-xs bg-green-100 text-green-700 px-2.5 py-1 rounded-full font-medium">'+p.category+'</span></td>'+
             '<td class="px-5 py-4"><div class="font-bold text-green-700 text-sm">'+fmt(p.price)+'</div>'+(p.originalPrice?'<div class="text-xs text-gray-400 line-through">'+fmt(p.originalPrice)+'</div>':'')+'</td>'+
@@ -2451,6 +2520,8 @@ function closePromoPopup(){
 // ============================================================
 let _pendingImages = [];
 let _existingImages = [];
+let _focalPoints = [];
+let _focalIdx = 0;
 
 function compressImage(file, cb){
   var reader=new FileReader();
@@ -2481,7 +2552,9 @@ function handleImageSelect(input){
     if(f.type.indexOf('image/')!==0) return;
     compressImage(f,function(src,name){
       _pendingImages.push({name:name,src:src});
+      if(_focalPoints.length<_existingImages.length+_pendingImages.length) _focalPoints.push(null);
       renderImagePreviews();
+      renderFocalEditor();
     });
   });
   input.value='';
@@ -2493,7 +2566,9 @@ function handleImageDrop(e){
   files.forEach(function(f){
     compressImage(f,function(src,name){
       _pendingImages.push({name:name,src:src});
+      if(_focalPoints.length<_existingImages.length+_pendingImages.length) _focalPoints.push(null);
       renderImagePreviews();
+      renderFocalEditor();
     });
   });
   if(!files.length) showToast('Somente arquivos de imagem','warn');
@@ -2503,21 +2578,32 @@ function renderImagePreviews(){
   var c=document.getElementById('image-preview');
   if(!c) return;
   c.innerHTML='';
-  _existingImages.forEach(function(url,i){
-    var chip=document.createElement('div');chip.className='img-chip';
+  function delImage(gi){
+    if(!_focalPoints)_focalPoints=[];
+    if(gi<_existingImages.length){_existingImages.splice(gi,1);}
+    else{_pendingImages.splice(gi-_existingImages.length,1);}
+    if(_focalPoints.length>gi)_focalPoints.splice(gi,1);
+    var total=_existingImages.length+_pendingImages.length;
+    if(_focalIdx>=total)_focalIdx=Math.max(0,total-1);
+    renderImagePreviews();
+    renderFocalEditor();
+    syncFocal();
+    syncImages();
+  }
+  var all=_existingImages.concat(_pendingImages.map(function(x){return x.src}));
+  all.forEach(function(url,gi){
+    var chip=document.createElement('div');
+    chip.className='img-chip'+(gi===_focalIdx?' selected':'');
+    chip.title='Clique para definir o foco desta foto';
+    chip.style.cursor='pointer';
     var img=document.createElement('img');img.src=url;
     var del=document.createElement('button');del.type='button';del.className='del-chip';
     del.innerHTML='<i class="fas fa-times"></i>';
-    del.onclick=function(){_existingImages.splice(i,1);renderImagePreviews();syncImages()};
-    chip.appendChild(img);chip.appendChild(del);c.appendChild(chip);
-  });
-  _pendingImages.forEach(function(item,i){
-    var chip=document.createElement('div');chip.className='img-chip';
-    var img=document.createElement('img');img.src=item.src;
-    var del=document.createElement('button');del.type='button';del.className='del-chip';
-    del.innerHTML='<i class="fas fa-times"></i>';
-    del.onclick=function(){_pendingImages.splice(i,1);renderImagePreviews();syncImages()};
-    chip.appendChild(img);chip.appendChild(del);c.appendChild(chip);
+    del.onclick=function(e){e.stopPropagation();delImage(gi)};
+    chip.onclick=function(){_focalIdx=gi;renderImagePreviews();renderFocalEditor()};
+    chip.appendChild(img);
+    if(_focalPoints&&_focalPoints[gi]){var mk=document.createElement('div');mk.className='chip-marker';chip.appendChild(mk);}
+    chip.appendChild(del);c.appendChild(chip);
   });
   var add=document.createElement('div');
   add.className='img-chip primary flex items-center justify-center cursor-pointer hover:bg-green-50 transition-colors';
@@ -2527,18 +2613,82 @@ function renderImagePreviews(){
   syncImages();
 }
 
+function renderFocalEditor(){
+  var cp=document.getElementById('focal-panel');
+  if(!cp) return;
+  var all=_existingImages.concat(_pendingImages.map(function(x){return x.src}));
+  var url=all[_focalIdx];
+  if(!url){cp.classList.add('hidden');return;}
+  cp.classList.remove('hidden');
+  var img=document.getElementById('focal-img');
+  var mk=document.getElementById('focal-marker');
+  if(!img||!mk) return;
+  img.src=url;
+  var f=_focalPoints&&_focalPoints[_focalIdx];
+  if(f&&typeof f.x==='number'&&f.x>=0&&f.x<=100&&typeof f.y==='number'&&f.y>=0&&f.y<=100){
+    img.style.objectPosition=f.x+'% '+f.y+'%';
+    mk.style.left=f.x+'%';mk.style.top=f.y+'%';mk.classList.remove('hidden');
+  } else {
+    img.style.objectPosition='50% 50%';
+    mk.classList.add('hidden');
+  }
+  syncFocal();
+}
+
+function pickFocal(e){
+  var img=document.getElementById('focal-img');
+  if(!img||!img.src) return;
+  var r=img.getBoundingClientRect();
+  if(!r.width||!r.height) return;
+  var x=Math.max(0,Math.min(100,Math.round((e.clientX-r.left)/r.width*100)));
+  var y=Math.max(0,Math.min(100,Math.round((e.clientY-r.top)/r.height*100)));
+  if(!_focalPoints)_focalPoints=[];
+  _focalPoints[_focalIdx]={x:x,y:y};
+  img.style.objectPosition=x+'% '+y+'%';
+  var mk=document.getElementById('focal-marker');
+  if(mk){mk.style.left=x+'%';mk.style.top=y+'%';mk.classList.remove('hidden');}
+  var chips=document.querySelectorAll('#image-preview .img-chip');
+  if(chips[_focalIdx]){
+    var exists=chips[_focalIdx].querySelector('.chip-marker');
+    if(!exists){var cm=document.createElement('div');cm.className='chip-marker';chips[_focalIdx].appendChild(cm);}
+  }
+  syncFocal();
+}
+
+function resetFocal(){
+  if(_focalPoints)_focalPoints[_focalIdx]=null;
+  var img=document.getElementById('focal-img');
+  var mk=document.getElementById('focal-marker');
+  if(img)img.style.objectPosition='50% 50%';
+  if(mk)mk.classList.add('hidden');
+  var chips=document.querySelectorAll('#image-preview .img-chip');
+  if(chips[_focalIdx]){var m=chips[_focalIdx].querySelector('.chip-marker');if(m)m.remove();}
+  syncFocal();
+}
+
+function syncFocal(){
+  var h=document.getElementById('focal-final');
+  if(!h) return;
+  h.value=(_focalPoints||[]).map(function(f){return f&&typeof f.x==='number'?f.x+','+f.y:''}).join('|');
+}
+
 function syncImages(){
   var h=document.getElementById('images-final');
   if(!h) return;
   var all=_existingImages.concat(_pendingImages.map(function(x){return x.src}));
   h.value=JSON.stringify(all);
+  if(_focalPoints.length<all.length) while(_focalPoints.length<all.length)_focalPoints.push(null);
+  syncFocal();
 }
 
 function initProductImages(id){
   _pendingImages=[];
   var p=id?DB.products().find(function(x){return x.id===id}):null;
   _existingImages=p?(p.images||[]):[];
+  _focalPoints=(p&&p.focalPoints&&p.focalPoints.length)?p.focalPoints.slice():[];
+  _focalIdx=0;
   renderImagePreviews();
+  renderFocalEditor();
 }
 
 function toggleImageMode(){
@@ -2551,6 +2701,7 @@ function toggleImageMode(){
   umt.classList.toggle('hidden',!isUrl);
   tog.innerHTML=isUrl?'<i class="fas fa-cloud-upload-alt mr-1"></i>Usar upload de arquivos':'<i class="fas fa-link mr-1"></i>Usar URL manual';
   syncImages();
+  if(!isUrl) renderFocalEditor();
 }
 
 // ============================================================
@@ -2608,11 +2759,26 @@ function renderProductForm(id){
               '</div>'+
               '<input type="file" id="image-upload" accept="image/*" multiple class="hidden" onchange="handleImageSelect(this)">'+
               '<div id="image-preview" class="flex flex-wrap gap-3 mt-4"></div>'+
+              '<div id="focal-panel" class="mt-5 hidden">'+
+                '<p class="text-xs font-medium text-gray-600 mb-1">Foco da foto <span class="text-gray-400 font-normal">(opcional: clique na foto para definir o corte. Sem foco, a imagem aparece inteira e centralizada no anuncio e destaque)</span></p>'+
+                '<div class="flex flex-col sm:flex-row sm:items-start gap-4">'+
+                  '<div class="relative shrink-0" id="focal-stage">'+
+                    '<img id="focal-img" src="" alt="" onclick="pickFocal(event)" class="w-52 h-52 md:w-56 md:h-56 rounded-xl border-2 border-green-200 bg-gray-100 cursor-crosshair select-none" style="object-fit:cover">'+
+                    '<div id="focal-marker" class="pointer-events-none absolute w-6 h-6 -ml-3 -mt-3 rounded-full border-2 border-white shadow-md hidden z-10" style="background:rgba(22,163,74,.85)"></div>'+
+                  '</div>'+
+                  '<div class="text-xs text-gray-500 space-y-2 sm:pt-1">'+
+                    '<p><i class="fas fa-crosshairs text-green-500 mr-1"></i>Clique no ponto de foco: a imagem sera centralizada com o ponto marcado no destaque e anuncio.</p>'+
+                    '<p><i class="fas fa-images text-green-500 mr-1"></i>Selecione uma miniatura abaixo para ajustar o foco de cada foto.</p>'+
+                    '<button type="button" onclick="resetFocal()" class="inline-flex items-center bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-1.5 rounded-lg font-medium transition-colors"><i class="fas fa-undo mr-1"></i>Limpar / Centralizar</button>'+
+                  '</div>'+
+                '</div>'+
+              '</div>'+
             '</div>'+
             '<div id="url-mode" class="hidden">'+
               '<textarea id="images-url-input" rows="2" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none resize-none" placeholder="https://...">'+(p?p.images.filter(function(i){return i.indexOf('img/produtos')!==0}).join('\n'):'')+'</textarea>'+
             '</div>'+
             '<input type="hidden" id="images-final" name="images" value="'+(p?p.images.join('\\n'):'')+'">'+
+            '<input type="hidden" id="focal-final" name="focalPoints" value="'+(p&&p.focalPoints?p.focalPoints.map(function(f){return f?f.x+','+f.y:''}).join('|'):'')+'">'+
             '<div id="images-url-fallback" class="hidden"></div>'+
             '<div id="upload-msg" class="text-xs mt-2"></div>'+
           '</div>'+
@@ -2648,6 +2814,15 @@ function saveProduct(e,id){
   if(!images.length&&rawImages){
     images=rawImages.split('\n').map(function(t){return t.trim()}).filter(Boolean);
   }
+  if(!images.length){images=['https://picsum.photos/seed/'+genId()+'/600/500'];}
+  var focalParts=(f.get('focalPoints')||'').split('|');
+  var focalPoints=images.map(function(url,i){
+    var part=(focalParts[i]||'').trim();
+    if(!part) return null;
+    var c=part.split(',');
+    var x=parseFloat(c[0]),y=parseFloat(c[1]);
+    return (isNaN(x)||isNaN(y))?null:{x:x,y:y};
+  });
   const data={
     name:f.get('name'),category:f.get('category'),sku:f.get('sku'),brand:f.get('brand')||null,
     species:f.get('species')||null,unitType:f.get('unitType')||'un',unitQty:parseFloat(f.get('unitQty'))||1,
@@ -2656,10 +2831,10 @@ function saveProduct(e,id){
     stock:f.get('stock')?parseInt(f.get('stock')):null,
     tags:f.get('tags').split(',').map(function(t){return t.trim()}).filter(Boolean),
     images:images,
+    focalPoints:focalPoints,
     description:f.get('description'),techInfo:f.get('techInfo')||'',
     featured:f.get('featured')==='on',active:f.get('active')==='on',prescription:f.get('prescription')==='on',
   };
-  if(!data.images.length){data.images=['https://picsum.photos/seed/'+genId()+'/600/500'];}
   if(id){
     const idx=products.findIndex(function(x){return x.id===id});
     if(idx>=0) products[idx]=Object.assign({},products[idx],data);
