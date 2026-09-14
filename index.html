@@ -394,7 +394,7 @@ const DEFAULT_ORDERS = [
 const DB = (function(){
   const mem = {};                       // cache em memoria (espelho)
   const fire = { db: null };            // instancia do Firestore
-  const COLL = ['products','orders','customers','users','categories','promos','events','cart','currentUser','news'];
+  const COLL = ['products','orders','customers','users','categories','promos','events','cart','news'];
   const pending = {};
   const timers = {};
 
@@ -485,8 +485,21 @@ const DB = (function(){
     setUsers(v){ mem['users']=v; persist('users'); return true; },
     cart(){return this.g('cart')||[]},
     setCart(v){ mem['cart']=v; persist('cart'); return true; },
-    currentUser(){return this.g('currentUser')},
-    setCurrentUser(v){ mem['currentUser']=v; persist('currentUser'); return true; },
+    currentUser(){
+      try{
+        var raw=localStorage.getItem('agrovel_currentUser');
+        if(raw) return JSON.parse(raw);
+      }catch(e){}
+      return mem['currentUser']||null;
+    },
+    setCurrentUser(v){
+      mem['currentUser']=v;
+      try{
+        if(v) localStorage.setItem('agrovel_currentUser', JSON.stringify(v));
+        else localStorage.removeItem('agrovel_currentUser');
+      }catch(e){}
+      return true;
+    },
     filters(){
       var def={category:'',species:'',brand:'',search:'',sort:'featured'};
       try{
