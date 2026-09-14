@@ -87,7 +87,8 @@
     #toast{bottom:80px;right:12px}
     #cart-sidebar,#copilot-panel{width:100%!important;max-width:100%!important}
     #mobile-menu{max-height:0;overflow:hidden;transition:max-height .3s ease}
-    #mobile-menu.open{max-height:400px}
+    #mobile-menu.open{max-height:600px}
+    .mobile-highlight{border-left:3px solid #22c55e;padding-left:12px}
     .admin-sidebar{position:fixed!important;left:0;top:0;bottom:0;z-index:60;transform:translateX(-100%);transition:transform .3s ease;width:280px!important;display:none!important}
     .admin-sidebar.open{transform:translateX(0);display:flex!important}
     .admin-mobile-overlay{display:none}
@@ -180,8 +181,11 @@
           <div id="user-menu" class="flex items-center gap-2"></div>
         </div>
       </div>
-      <div id="mobile-menu" class="md:hidden border-t border-green-800 pb-3">
-        <button onclick="navigate('catalog')" class="w-full text-left px-4 py-3 text-sm hover:bg-green-800 rounded-lg transition-colors"><i class="fas fa-store mr-2"></i>Catalogo</button>
+      <div id="mobile-menu" class="md:hidden border-t border-green-800 pb-3 pt-2">
+        <button onclick="navigate('blog')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-1 mobile-highlight"><i class="fas fa-newspaper mr-2 text-green-400"></i>AGROVELinforma</button>
+        <button onclick="navigate('about')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-1 mobile-highlight"><i class="fas fa-info-circle mr-2 text-green-400"></i>Sobre</button>
+        <button onclick="navigate('catalog')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-2 mobile-highlight"><i class="fas fa-store mr-2 text-green-400"></i>Catalogo</button>
+        <div class="border-t border-green-800 my-1"></div>
         <span id="mobile-cat-nav"></span>
       </div>
     </div>
@@ -655,8 +659,7 @@ function renderCategoryNavs(){
   }).join('');
   var mnav=document.getElementById('mobile-cat-nav');
   if(mnav) mnav.innerHTML=
-    '<button onclick="navigate(\'blog\')" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-newspaper mr-2 text-green-500"></i>AGROVELinforma</button>'+
-    '<button onclick="navigate(\'about\')" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-info-circle mr-2 text-green-500"></i>Sobre</button>'+
+    '<div class="text-xs text-green-500 uppercase tracking-wider px-4 pt-1 pb-1 font-medium">Categorias</div>'+
     cats.map(function(c){
     return '<button onclick="filterCategory(\''+c+'\')" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas '+iconForCat(c)+' mr-2 text-green-500"></i>'+c+'</button>';
   }).join('');
@@ -1739,7 +1742,7 @@ function renderAbout(){
       '<img src="img/logo.gif" alt="Agrovel" class="h-16 md:h-20 w-auto mx-auto mb-6">'+
       '<div class="inline-flex items-center gap-2 bg-amber-500 text-green-950 px-4 py-1.5 rounded-full text-sm font-bold mb-4 shadow"><i class="fas fa-medal"></i> Desde 1996 &bull; Iju&iacute; - RS</div>'+
       '<h1 class="text-3xl md:text-5xl font-bold text-gray-900 mb-4">Mais que Produtos, <span class="text-green-700">Solu&ccedil;&otilde;es.</span></h1>'+
-      '<p class="text-gray-600 max-w-2xl mx-auto text-base md:text-lg leading-relaxed">A Agrovel Agro Veterin&aacute;ria h&aacute; mais de duas d&eacute;cadas atende produtores rurais, criadores e comunidades com medicamentos veterin&aacute;rios, nutri&ccedil;&atilde;o animal, equipamentos, sementes e ferramentas de qualidade comprovada, sempre com atendimento t&eacute;cnico especializado.</p>'+
+      '<p class="text-gray-600 max-w-2xl mx-auto text-base md:text-lg leading-relaxed">A Agrovel Agroveterinária h&aacute; mais de três d&eacute;cadas atende produtores rurais, criadores e comunidades com medicamentos veterin&aacute;rios, nutri&ccedil;&atilde;o animal, equipamentos, sementes e ferramentas de qualidade comprovada, sempre com atendimento t&eacute;cnico especializado.</p>'+
     '</section>'+
     '<section class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12">'+
       [
