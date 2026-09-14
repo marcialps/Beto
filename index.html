@@ -181,7 +181,7 @@
         </div>
       </div>
       <div id="mobile-menu" class="md:hidden border-t border-green-800 pb-3">
-        <button onclick="navigate('catalog');toggleMobileMenu()" class="w-full text-left px-4 py-3 text-sm hover:bg-green-800 rounded-lg transition-colors"><i class="fas fa-store mr-2"></i>Catalogo</button>
+        <button onclick="navigate('catalog')" class="w-full text-left px-4 py-3 text-sm hover:bg-green-800 rounded-lg transition-colors"><i class="fas fa-store mr-2"></i>Catalogo</button>
         <span id="mobile-cat-nav"></span>
       </div>
     </div>
@@ -655,10 +655,10 @@ function renderCategoryNavs(){
   }).join('');
   var mnav=document.getElementById('mobile-cat-nav');
   if(mnav) mnav.innerHTML=
-    '<button onclick="navigate(\'blog\');toggleMobileMenu()" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-newspaper mr-2 text-green-500"></i>AGROVELinforma</button>'+
-    '<button onclick="navigate(\'about\');toggleMobileMenu()" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-info-circle mr-2 text-green-500"></i>Sobre</button>'+
+    '<button onclick="navigate(\'blog\')" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-newspaper mr-2 text-green-500"></i>AGROVELinforma</button>'+
+    '<button onclick="navigate(\'about\')" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-info-circle mr-2 text-green-500"></i>Sobre</button>'+
     cats.map(function(c){
-    return '<button onclick="filterCategory(\''+c+'\');toggleMobileMenu()" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas '+iconForCat(c)+' mr-2 text-green-500"></i>'+c+'</button>';
+    return '<button onclick="filterCategory(\''+c+'\')" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas '+iconForCat(c)+' mr-2 text-green-500"></i>'+c+'</button>';
   }).join('');
 }
 
