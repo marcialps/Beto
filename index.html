@@ -204,6 +204,8 @@
       <div>
         <div class="text-white font-semibold mb-3">Informações</div>
         <ul class="space-y-1 text-sm">
+          <li><button onclick="navigate('blog')" class="hover:text-white"><i class="fas fa-newspaper mr-2"></i>AGROVELinforma</button></li>
+          <li><button onclick="navigate('about')" class="hover:text-white"><i class="fas fa-info-circle mr-2"></i>Sobre a Agrovel</button></li>
           <li>Frete a negociar</li>
           <li>Mais de 12.000 produtos</li>
           <li>Produtos com garantia</li>
@@ -241,6 +243,8 @@
 const DEFAULT_CATEGORIES = ['Racoes','Medicamentos','Equipamentos','Ferramentas','Sementes','Fertilizantes','Pet Shop','EPIs'];
 function getCategories(){return DB.g('categories')||DEFAULT_CATEGORIES}
 
+const NEWS_CATEGORIES = ['Notícias','Dicas','Eventos','Manejo','Tecnologia','Clínica','Promoções'];
+
 const ALL_SPECIES = ['Caes','Gatos','Equinos','Bovinos','Aves','Suinos','Ovinos','Peixes'];
 
 const DEFAULT_PRODUCTS = [
@@ -272,6 +276,85 @@ const DEFAULT_PRODUCTS = [
 ];
 
 
+
+const DEFAULT_NEWS = [
+  {id:'n1',title:'Calendário sanitário e manejo de rebanho: o que o produtor deve observar em 2026',category:'Manejo',
+    excerpt:'Vacinações, vermifugações e atualização cadastral: organize as datas e mantenha a sanidade do seu rebanho em dia durante todo o ano.',
+    content:[
+      '# Por que planejar a sanidade do rebanho?',
+      'Manter um calendário sanitário organizado é a base de uma pecuária produtiva e lucrativa. A prevenção evita perdas, reduz custos e valoriza o plantel.',
+      '## Etapas importantes para o ano',
+      '- Vacinação contra febre aftosa nas janelas previstas pelo estado;',
+      '- Vermifugação estratégica nos meses de maio, agosto e novembro;',
+      '- Atualização cadastral do rebanho junto ao órgão de defesa sanitária;',
+      '- Controle de carrapatos com rotação de princípios ativos.',
+      'Conte sempre com o suporte técnico da Agrovel para escolher os melhores produtos e organizar o manejo da sua propriedade.'
+    ].join('\n'),
+    tags:['sanidade','bovinos','calendário','vacinação'],cover:'https://picsum.photos/seed/agrovel-bovinos/1200/630',video:null,author:'Equipe Agrovel',featured:true,active:true,views:214,createdAt:'2026-08-20T10:00:00'},
+  {id:'n2',title:'Carrapato bovino: como fazer um controle eficaz na sua propriedade',category:'Dicas',
+    excerpt:'O carrapato é um dos maiores vilões da pecuária. Veja estratégias práticas de controle e rotação de produtos para proteger o rebanho.',
+    content:[
+      '# O carrapato no dia a dia da fazenda',
+      'O Rhipicephalus microplus causa prejuízos diretos e indiretos: quedas na produção, transmissão de doenças e desvalorização do couro.',
+      '## Estratégias de controle',
+      '- Aplicação de carrapaticidas com rotação de princípios ativos;',
+      '- Tratamento estratégico nas épocas de maior infestação;',
+      '- Rotação de piquetes para quebrar o ciclo do parasita;',
+      '- Acompanhamento veterinário para escolha do produto ideal.',
+      'Na Agrovel você encontra linhas pour-on, injetáveis e de banho para cada realidade de criação.'
+    ].join('\n'),
+    tags:['bovinos','carrapato','sanidade','carrapaticida'],cover:'https://picsum.photos/seed/agrovel-carrapato/1200/630',video:null,author:'Equipe Agrovel',featured:false,active:true,views:187,createdAt:'2026-08-12T09:30:00'},
+  {id:'n3',title:'Agrovel marca presença em evento regional do agronegócio',category:'Eventos',
+    excerpt:'A Agrovel participou da edição deste ano com demonstrações de produtos e atendimento técnico aos produtores da região.',
+    content:[
+      '# A Agrovel no evento',
+      'Mais uma vez marcamos presença em um dos maiores encontros regionais voltados ao produtor rural.',
+      '## O que rolou por lá',
+      '- Demonstração de medicamentos, nutrição e equipamentos;',
+      '- Atendimento técnico individualizado para cada cultura e rebanho;',
+      '- Novidades em tecnologia para o manejo no campo.',
+      'Agradecemos a todos que visitaram nosso estande. Até a próxima edição!'
+    ].join('\n'),
+    tags:['eventos','agrovel','agronegócio'],cover:'https://picsum.photos/seed/agrovel-evento/1200/630',video:null,author:'Equipe Agrovel',featured:false,active:true,views:96,createdAt:'2026-08-05T14:00:00'},
+  {id:'n4',title:'Nutrição de equinos: como escolher a ração ideal',category:'Dicas',
+    excerpt:'Cada fase da vida exige uma nutrição diferente. Saiba como avaliar a melhor ração para o seu cavalo de trabalho, esporte ou lazer.',
+    content:[
+      '# Nutrição que faz diferença',
+      'A alimentação correta reflete diretamente no desempenho, na saúde e no bem-estar dos equinos.',
+      '## O que observar na hora da escolha',
+      '- Idade, peso e nível de atividade do animal;',
+      '- Níveis de proteína e fibra declarados na embalagem;',
+      '- Qualidade e procedência dos ingredientes;',
+      '- Recomendação do médico veterinário.',
+      'Em dúvida? A equipe Agrovel ajuda você a escolher a ração certa para cada etapa.'
+    ].join('\n'),
+    tags:['equinos','nutrição','ração'],cover:'https://picsum.photos/seed/agrovel-equinos/1200/630',video:null,author:'Equipe Agrovel',featured:false,active:true,views:142,createdAt:'2026-07-28T11:00:00'},
+  {id:'n5',title:'Equipamentos que facilitam o dia a dia no campo',category:'Tecnologia',
+    excerpt:'Pulverizadores, bebedouros e cercas: conheça os equipamentos que aumentam a eficiência da rotina rural com durabilidade e economia.',
+    content:[
+      '# Tecnologia a favor do produtor',
+      'Investir em bons equipamentos reduz o esforço manual, economiza insumos e aumenta a produtividade.',
+      '## Itens que fazem a diferença',
+      '- Pulverizadores com bicos reguláveis e alta durabilidade;',
+      '- Bebedouros automáticos que mantêm a água sempre limpa;',
+      '- Eletrificadores e fios de alta resistência para o manejo.',
+      'Fale com a Agrovel e confira as melhores marcas do mercado.'
+    ].join('\n'),
+    tags:['equipamentos','tecnologia','campo'],cover:'https://picsum.photos/seed/agrovel-equipamentos/1200/630',video:null,author:'Equipe Agrovel',featured:false,active:true,views:88,createdAt:'2026-07-20T08:30:00'},
+  {id:'n6',title:'Preparando a propriedade para a primavera: manejo de pastagens',category:'Manejo',
+    excerpt:'Com a chegada da estação, chega também o momento de cuidar das pastagens. Veja dicas de adubação, rotação e recuperação de áreas.',
+    content:[
+      '# Pastagens prontas para a estação',
+      'A primavera é o período-chave para garantir volume e qualidade de forragem no ano todo.',
+      '## Dicas de manejo',
+      '- Faça a análise de solo e corrija a adubação;',
+      '- Diferir pastos para permitir descanso e rebrota;',
+      '- Controle plantas daninhas antes da seca;',
+      '- Monitore a lotação dos piquetes.',
+      'Uma pastagem bem manejada reduz custos e melhora o desempenho dos animais.'
+    ].join('\n'),
+    tags:['pastagem','manejo','primavera'],cover:'https://picsum.photos/seed/agrovel-pastagem/1200/630',video:null,author:'Equipe Agrovel',featured:false,active:true,views:73,createdAt:'2026-07-15T10:00:00'}
+];
 
 const DEFAULT_USERS = [
   {id:'u1',name:'Administrador',email:'beto@agrovel.com',password:'admin123',role:'admin',avatar:'AD'},
@@ -317,7 +400,7 @@ const DEFAULT_ORDERS = [
 const DB = (function(){
   const mem = {};                       // cache em memoria (espelho)
   const fire = { db: null };            // instancia do Firestore
-  const COLL = ['products','orders','customers','users','categories','promos','events','cart','filters','currentUser'];
+  const COLL = ['products','orders','customers','users','categories','promos','events','cart','filters','currentUser','news'];
   const pending = {};
   const timers = {};
 
@@ -330,6 +413,7 @@ const DB = (function(){
       case 'categories':return DEFAULT_CATEGORIES;
       case 'promos':   return [];
       case 'events':   return DEFAULT_EVENTS||[];
+      case 'news':     return DEFAULT_NEWS;
       case 'cart':     return [];
       case 'currentUser': return null;
       case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'featured'};
@@ -415,6 +499,8 @@ const DB = (function(){
     setPromos(v){ mem['promos']=v; persist('promos'); return true; },
     events(){return this.g('events')||DEFAULT_EVENTS},
     setEvents(v){ mem['events']=v; persist('events'); return true; },
+    news(){return this.g('news')||DEFAULT_NEWS},
+    setNews(v){ mem['news']=v; persist('news'); return true; },
     categories(){return this.g('categories')},
     setCategories(v){ mem['categories']=v; persist('categories'); return true; },
   };
@@ -513,6 +599,10 @@ let State = {
   editingCategory:null,
   copilotTab:'desc',
   editingPromo:null,
+  newsId:null,
+  editNewsId:null,
+  blogCategory:'',
+  blogSearch:'',
 };
 
 // ============================================================
@@ -545,15 +635,19 @@ function iconForCat(c){
 function renderCategoryNavs(){
   var cats=getCategories();
   var hdr=document.getElementById('header-cat-nav');
-  if(hdr) hdr.innerHTML='<div class="flex items-center gap-5">'+cats.slice(0,5).map(function(c){
-    return '<button onclick="filterCategory(\''+c+'\')" class="hover:text-green-300 transition-colors">'+c+'</button>';
-  }).join('')+'</div>';
+  if(hdr) hdr.innerHTML='<div class="flex items-center gap-5">'+
+    '<button onclick="navigate(\'blog\')" class="hover:text-green-300 transition-colors"><i class="fas fa-newspaper mr-1.5 text-green-400"></i>AGROVELinforma</button>'+
+    '<button onclick="navigate(\'about\')" class="hover:text-green-300 transition-colors"><i class="fas fa-info-circle mr-1.5 text-green-400"></i>Sobre</button>'+
+  '</div>';
   var ftr=document.getElementById('footer-cat-list');
   if(ftr) ftr.innerHTML=cats.map(function(c){
     return '<li><button onclick="filterCategory(\''+c+'\')" class="hover:text-white">'+c+'</button></li>';
   }).join('');
   var mnav=document.getElementById('mobile-cat-nav');
-  if(mnav) mnav.innerHTML=cats.map(function(c){
+  if(mnav) mnav.innerHTML=
+    '<button onclick="navigate(\'blog\');toggleMobileMenu()" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-newspaper mr-2 text-green-500"></i>AGROVELinforma</button>'+
+    '<button onclick="navigate(\'about\');toggleMobileMenu()" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas fa-info-circle mr-2 text-green-500"></i>Sobre</button>'+
+    cats.map(function(c){
     return '<button onclick="filterCategory(\''+c+'\');toggleMobileMenu()" class="w-full text-left px-4 py-2 text-sm text-green-300 hover:bg-green-800 rounded-lg transition-colors pl-8"><i class="fas '+iconForCat(c)+' mr-2 text-green-500"></i>'+c+'</button>';
   }).join('');
 }
@@ -583,6 +677,8 @@ function closeAdminSidebar(){
 function navigate(view,params){
   params=params||{};
   if(view==='catalog') trackEvent('page_view',{view:'catalog'});
+  if(view==='blog') trackEvent('page_view',{view:'blog'});
+  if(view==='about') trackEvent('page_view',{view:'about'});
   const user=DB.currentUser();
   if(view.startsWith('admin')&&!user){navigate('login');return}
   if(view.startsWith('admin')&&user&&user.role==='guest'){showToast('Sem permissao para esta area','error');return}
@@ -608,6 +704,9 @@ function render(){
     case 'cart':mc.innerHTML=renderCartPage();break;
     case 'checkout':mc.innerHTML=renderCheckout();break;
     case 'confirmation':mc.innerHTML=renderConfirmation(State.orderId);break;
+    case 'blog':mc.innerHTML=renderBlog();resolveIdbMedia(mc);break;
+    case 'blog-post':mc.innerHTML=renderBlogPost(State.newsId);resolveIdbMedia(mc);break;
+    case 'about':mc.innerHTML=renderAbout();break;
     case 'login':mc.innerHTML=renderLogin();break;
     case 'admin':mc.innerHTML=renderAdmin();renderAdminSection();break;
     default:mc.innerHTML=renderCatalog();featInit();
@@ -1408,6 +1507,274 @@ function doLogin(e){
 function logout(){DB.setCurrentUser(null);navigate('catalog');showToast('Ate logo!')}
 
 // ============================================================
+// VIEW: BLOG (AgrovelInforma)
+// ============================================================
+function esc(s){
+  return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+function inlineFmt(s){
+  return esc(s)
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g,'<em>$1</em>')
+    .replace(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" class="text-green-600 underline">$1</a>');
+}
+function newsToHtml(txt){
+  if(!txt) return '<p class="text-gray-700 leading-relaxed mb-3">Publicação sem conteúdo.</p>';
+  var lines=String(txt).split('\n');
+  var html='',list=false;
+  function closeList(){if(list){html+='</ul>';list=false;}}
+  lines.forEach(function(line){
+    var t=line.trim();
+    if(t===''){closeList();return;}
+    if(t.indexOf('### ')==0){closeList();html+='<h3 class="text-base md:text-lg font-bold text-gray-800 mt-4 mb-2">'+inlineFmt(t.slice(4))+'</h3>';return;}
+    if(t.indexOf('## ')==0){closeList();html+='<h2 class="text-lg md:text-xl font-bold text-gray-900 mt-6 mb-3">'+inlineFmt(t.slice(3))+'</h2>';return;}
+    if(t.indexOf('# ')==0){closeList();html+='<h1 class="text-xl md:text-2xl font-bold text-gray-900 mt-6 mb-3">'+inlineFmt(t.slice(2))+'</h1>';return;}
+    if(t.indexOf('- ')==0){if(!list){html+='<ul class="list-disc pl-5 my-3 space-y-1.5 text-gray-700">';list=true;}html+='<li>'+inlineFmt(t.slice(2))+'</li>';return;}
+    closeList();
+    html+='<p class="text-gray-700 leading-relaxed mb-3">'+inlineFmt(t)+'</p>';
+  });
+  closeList();
+  return html;
+}
+function newsDate(d){
+  if(!d) return '';
+  var dt=new Date(d);
+  if(isNaN(dt.getTime())) return '';
+  var meses=['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+  return dt.getDate()+' de '+meses[dt.getMonth()]+' de '+dt.getFullYear();
+}
+function readingMinutes(content){
+  var w=String(content||'').split(/\s+/).filter(Boolean).length;
+  return Math.max(1,Math.round(w/180));
+}
+function newsCoverImg(n,cls){
+  var src=n&&n.cover||'';
+  var alt=esc((n&&n.title)||'AgrovelInforma');
+  if(src&&String(src).indexOf('idb:')===0) return '<img data-idb="'+src+'" class="'+cls+'" alt="'+alt+'">';
+  if(src) return '<img src="'+src+'" class="'+cls+'" alt="'+alt+'">';
+  return '<div class="'+cls+' flex items-center justify-center bg-gradient-to-br from-green-100 to-emerald-100 text-green-400"><i class="fas fa-newspaper text-4xl md:text-5xl"></i></div>';
+}
+function newsVideoHTML(n){
+  var v=n&&n.video;
+  if(!v) return '';
+  var vr=String(v);
+  var id=ytEmbedId(vr);
+  if(id) return '<div class="aspect-video rounded-2xl overflow-hidden bg-black mt-6 shadow-md"><iframe src="'+ytEmbedUrl(vr)+'" class="w-full h-full" title="'+esc(n&&n.title||'Vídeo')+'" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></div>';
+  if(vr.indexOf('idb:')===0) return '<div class="aspect-video rounded-2xl overflow-hidden bg-black mt-6"><video data-idb="'+vr+'" controls playsinline class="w-full h-full"></video></div>';
+  return '<div class="aspect-video rounded-2xl overflow-hidden bg-black mt-6"><video src="'+vr+'" controls playsinline class="w-full h-full"></video></div>';
+}
+function blogCard(n){
+  var vidTag=(n.video)?'<span class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-lg"><i class="fas fa-play text-[9px]"></i>V\u00eddeo</span>':'';
+  return '<article onclick="navigate(\'blog-post\',{newsId:\''+n.id+'\'})" class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all cursor-pointer group">'+
+    '<div class="relative overflow-hidden h-48 bg-white">'+newsCoverImg(n,'w-full h-full object-cover transition-transform duration-500 group-hover:scale-105')+vidTag+'</div>'+
+    '<div class="p-5">'+
+      '<div class="flex items-center gap-2 mb-2 text-xs">'+
+        '<span class="text-green-700 font-semibold uppercase tracking-wide">'+esc(n.category||'Notícias')+'</span>'+
+        '<span class="text-gray-300">&bull;</span>'+
+        '<span class="text-gray-500">'+newsDate(n.createdAt)+'</span>'+
+      '</div>'+
+      '<h3 class="font-bold text-gray-900 leading-snug mb-2 line-clamp-2 group-hover:text-green-700 transition-colors">'+esc(n.title)+'</h3>'+
+      '<p class="text-sm text-gray-500 leading-relaxed line-clamp-3 mb-4">'+esc(n.excerpt||'')+'</p>'+
+      '<div class="flex items-center justify-between">'+
+        '<span class="text-xs text-gray-400 flex items-center gap-1"><i class="fas fa-clock"></i>'+readingMinutes(n.content)+' min de leitura</span>'+
+        '<span class="text-sm font-bold text-green-700 flex items-center gap-1">Ler <i class="fas fa-arrow-right text-xs transition-transform group-hover:translate-x-1"></i></span>'+
+      '</div>'+
+    '</div>'+
+  '</article>';
+}
+function blogFeatured(n){
+  return '<div onclick="navigate(\'blog-post\',{newsId:\''+n.id+'\'})" class="rounded-3xl overflow-hidden bg-white border border-green-100 shadow-md hover:shadow-xl transition-all cursor-pointer group mb-10">'+
+    '<div class="grid grid-cols-1 lg:grid-cols-2 gap-0">'+
+      '<div class="relative overflow-hidden h-64 lg:h-full min-h-[260px] bg-white">'+newsCoverImg(n,'w-full h-full object-cover transition-transform duration-700 group-hover:scale-105')+
+      (n.video?'<span class="absolute top-4 right-4 bg-red-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg flex items-center gap-1 shadow-lg"><i class="fas fa-play text-[9px]"></i>V\u00eddeo</span>':'')+
+      '</div>'+
+      '<div class="p-6 md:p-10 flex flex-col justify-center">'+
+        '<div class="inline-flex items-center gap-2 bg-amber-100 text-amber-800 px-3 py-1 rounded-full text-xs font-bold mb-4 w-max"><i class="fas fa-star"></i> Destaque</div>'+
+        '<div class="flex items-center gap-2 text-xs mb-3">'+
+          '<span class="text-green-700 font-semibold uppercase tracking-wide">'+esc(n.category||'Notícias')+'</span>'+
+          '<span class="text-gray-300">&bull;</span><span class="text-gray-500">'+newsDate(n.createdAt)+'</span>'+
+        '</div>'+
+        '<h2 class="text-2xl md:text-4xl font-extrabold text-gray-900 mb-4 leading-tight group-hover:text-green-700 transition-colors">'+esc(n.title)+'</h2>'+
+        '<p class="text-gray-600 leading-relaxed mb-6 line-clamp-3">'+esc(n.excerpt||'')+'</p>'+
+        '<div class="flex items-center gap-4">'+
+          '<span class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-3 rounded-xl transition-colors inline-flex items-center gap-2"><i class="fas fa-book-open text-sm"></i>Ler mat\u00e9ria completa</span>'+
+          '<span class="text-xs text-gray-400">'+readingMinutes(n.content)+' min de leitura</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+function renderBlog(){
+  var all=(DB.news()||[]).filter(function(n){return n.active});
+  var cats=[];
+  all.forEach(function(n){if(n.category&&cats.indexOf(n.category)<0)cats.push(n.category)});
+  cats.sort(function(a,b){return a.localeCompare(b)});
+  var filter=State.blogCategory||'';
+  var search=(State.blogSearch||'').toLowerCase();
+  var list=all.filter(function(n){
+    if(filter&&n.category!==filter)return false;
+    if(search){
+      var hay=(n.title+' '+(n.excerpt||'')+' '+(n.content||'')+' '+(n.tags||[]).join(' ')).toLowerCase();
+      if(hay.indexOf(search)<0)return false;
+    }
+    return true;
+  });
+  list.sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
+  var featured=null;
+  var rest=list;
+  if(!filter&&!search){
+    var fi=list.findIndex(function(n){return n.featured});
+    if(fi>=0){featured=list[fi];rest=list.filter(function(n){return n!==featured});}
+  }
+  return '<div class="fade-in">'+
+    '<section class="relative bg-gradient-to-br from-green-900 via-green-800 to-emerald-900 text-white overflow-hidden">'+
+      '<div class="absolute inset-0 opacity-10" style="background-image:url(\'https://picsum.photos/seed/agrovel-blog-hero/1200/500\');background-size:cover"></div>'+
+      '<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(245,158,11,0.12),transparent_55%)]"></div>'+
+      '<div class="relative max-w-7xl mx-auto px-4 py-12 md:py-16 text-center">'+
+        '<div class="inline-flex items-center gap-2 bg-amber-500/90 text-green-950 px-5 py-2 rounded-full text-sm font-bold mb-4 shadow-lg"><i class="fas fa-newspaper"></i> AGROVELinforma</div>'+
+        '<h1 class="text-3xl md:text-5xl font-bold leading-tight mb-4">Not\u00edcias, dicas e novidades<br><span class="text-amber-400">do Agroneg\u00f3cio</span></h1>'+
+        '<p class="text-green-200 max-w-2xl mx-auto text-sm md:text-base">Acompanhe as \u00faltimas informa\u00e7\u00f5es, tecnologias e eventos que fazem a diferen\u00e7a no campo.</p>'+
+      '</div>'+
+    '</section>'+
+    '<div class="max-w-7xl mx-auto px-4 py-8 md:py-12">'+
+      '<div class="flex flex-col md:flex-row gap-3 md:gap-4 md:items-center mb-8">'+
+        '<div class="flex-1 relative">'+
+          '<i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"></i>'+
+          '<input id="blog-search" type="text" value="'+(State.blogSearch||'')+'" oninput="updateBlogSearch(this.value)" placeholder="Buscar no AGROVELinforma..." class="w-full pl-11 pr-4 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 focus:ring-2 focus:ring-green-200 outline-none transition-all">'+
+        '</div>'+
+        '<select id="blog-cat-select" onchange="setBlogCategory(this.value)" class="px-4 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 outline-none cursor-pointer md:w-72">'+
+          '<option value="">Todas as categorias</option>'+
+          cats.map(function(c){return '<option value="'+c+'" '+(filter===c?'selected':'')+'>'+c+'</option>'}).join('')+
+        '</select>'+
+      '</div>'+
+      ((filter||search)?'<div class="flex items-center gap-3 mb-8"><span class="text-sm text-gray-500">'+list.length+' publica\u00e7\u00f5es encontradas</span><button onclick="clearBlogFilters()" class="text-xs bg-green-100 text-green-700 px-3 py-1.5 rounded-full font-medium hover:bg-green-200 transition-colors"><i class="fas fa-times mr-1"></i>Limpar filtros</button></div>':'')+
+      (featured?blogFeatured(featured):'')+
+      (rest.length===0?'<div class="text-center py-20"><div class="text-6xl mb-4">\ud83d\udcf0</div><h3 class="text-xl font-bold text-gray-700 mb-2">Nenhuma publica\u00e7\u00e3o encontrada</h3><p class="text-gray-400 mb-6">Ajuste a busca ou os filtros.</p><button onclick="clearBlogFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button></div>':
+      '<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">'+
+        rest.map(function(n){return blogCard(n)}).join('')+
+      '</div>')+
+    '</div>'+
+    '<section class="max-w-7xl mx-auto px-4 pb-14">'+
+      '<div class="rounded-3xl bg-gradient-to-r from-green-900 to-emerald-800 p-6 md:p-10 text-white flex flex-col md:flex-row md:items-center md:justify-between gap-6">'+
+        '<div>'+
+          '<div class="inline-flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-widest mb-2"><i class="fas fa-comments"></i> Precisa de orienta\u00e7\u00e3o?</div>'+
+          '<h3 class="text-xl md:text-2xl font-extrabold mb-1">Nossa equipe est\u00e1 pronta para ajudar.</h3>'+
+          '<p class="text-green-200 text-sm">Tire d\u00favidas sobre produtos, manejo e sanidade com quem entende do campo.</p>'+
+        '</div>'+
+        '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Vim pelo AGROVELinforma e gostaria de falar com um vendedor.')+'" target="_blank" rel="noopener" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-6 py-3.5 rounded-xl whitespace-nowrap text-center"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</a>'+
+      '</div>'+
+    '</section>'+
+  '</div>';
+}
+function setBlogCategory(cat){State.blogCategory=cat||'';render();}
+function updateBlogSearch(val){State.blogSearch=val;if(window._bs)clearTimeout(window._bs);window._bs=setTimeout(function(){render()},250);}
+function clearBlogFilters(){State.blogCategory='';State.blogSearch='';render();}
+function renderBlogPost(id){
+  var news=DB.news();
+  var idx=news.findIndex(function(x){return x.id===id});
+  var n=idx>=0?news[idx]:null;
+  if(!n||!n.active) return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="text-6xl mb-4">\ud83d\udced</div><h2 class="text-xl font-bold text-gray-700 mb-4">Publica\u00e7\u00e3o n\u00e3o encontrada</h2><button onclick="navigate(\'blog\')" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar ao blog</button></div>';
+  if(!n.views)n.views=0;
+  news[idx].views=n.views+1;
+  DB.setNews(news);
+  trackEvent('blog_view',{newsId:n.id,title:n.title,category:n.category||''});
+  var related=DB.news().filter(function(x){return x.active&&x.category===n.category&&x.id!==n.id});
+  if(related.length>3)related=related.slice(0,3);
+  var shareText=encodeURIComponent('Confira esse artigo agro da Agrovel: '+n.title);
+  var shareUrl='https://wa.me/'+getWhatsAppNumber()+'?text='+shareText;
+  return '<div class="max-w-4xl mx-auto px-4 py-8 md:py-12 fade-in">'+
+    '<nav class="text-sm text-gray-500 mb-6 flex items-center gap-2 flex-wrap">'+
+      '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">In\u00edcio</button><i class="fas fa-chevron-right text-xs"></i>'+
+      '<button onclick="navigate(\'blog\')" class="hover:text-green-700">AGROVELinforma</button><i class="fas fa-chevron-right text-xs"></i>'+
+      '<span class="text-gray-800 font-medium line-clamp-1">'+esc(n.title)+'</span>'+
+    '</nav>'+
+    '<div class="rounded-2xl border border-green-100 bg-white shadow-sm overflow-hidden">'+
+      '<div class="relative h-64 md:h-96 bg-white">'+newsCoverImg(n,'w-full h-full object-cover')+'</div>'+
+      newsVideoHTML(n)+
+      '<div class="p-6 md:p-10">'+
+        '<div class="flex items-center gap-2 mb-4 text-xs flex-wrap">'+
+          '<span class="text-green-700 font-semibold uppercase tracking-wide bg-green-100 px-3 py-1 rounded-full">'+esc(n.category||'Not\u00edcias')+'</span>'+
+          (n.featured?'<span class="bg-amber-100 text-amber-800 px-3 py-1 rounded-full font-bold"><i class="fas fa-star mr-1"></i>Destaque</span>':'')+
+          (n.video?'<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full font-bold"><i class="fas fa-video mr-1"></i>V\u00eddeo</span>':'')+
+        '</div>'+
+        '<h1 class="text-2xl md:text-4xl font-extrabold text-gray-900 leading-tight mb-4">'+esc(n.title)+'</h1>'+
+        '<div class="flex items-center justify-between flex-wrap gap-3 mb-6 pb-6 border-b border-green-100">'+
+          '<div class="flex items-center gap-3">'+
+            '<div class="w-10 h-10 bg-green-600 rounded-full flex items-center justify-center text-white font-bold text-sm">'+esc((n.author||'Agrovel').charAt(0).toUpperCase())+'</div>'+
+            '<div><div class="text-sm font-semibold text-gray-800">'+esc(n.author||'Equipe Agrovel')+'</div><div class="text-xs text-gray-400">'+newsDate(n.createdAt)+' &bull; '+readingMinutes(n.content)+' min de leitura</div></div>'+
+          '</div>'+
+          '<div class="flex items-center gap-2">'+
+            '<span class="text-xs text-gray-400"><i class="fas fa-eye mr-1"></i>'+(n.views||0)+' visualiza\u00e7\u00f5es</span>'+
+            '<a href="'+shareUrl+'" target="_blank" rel="noopener" title="Compartilhar no WhatsApp" class="bg-green-100 text-green-700 hover:bg-green-600 hover:text-white w-9 h-9 rounded-full flex items-center justify-center transition-colors"><i class="fab fa-whatsapp"></i></a>'+
+          '</div>'+
+        '</div>'+
+        '<div>'+newsToHtml(n.content)+'</div>'+
+        (n.tags&&n.tags.length?'<div class="flex flex-wrap gap-2 mt-6 pt-6 border-t border-green-100">'+n.tags.map(function(t){return '<span class="text-xs bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full">#'+esc(t)+'</span>'}).join('')+'</div>':'')+
+      '</div>'+
+    '</div>'+
+    '<div class="mt-8 rounded-2xl bg-gradient-to-r from-green-900 to-emerald-800 p-6 md:p-8 text-white flex flex-col md:flex-row md:items-center md:justify-between gap-4">'+
+      '<div><div class="font-bold text-lg mb-1">Ficou com d\u00favidas?</div><p class="text-green-200 text-sm">Fale com um vendedor Agrovel e receba orienta\u00e7\u00e3o especializada.</p></div>'+
+      '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Vim pelo AGROVELinforma e gostaria de falar com um vendedor.')+'" target="_blank" rel="noopener" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-5 py-3 rounded-xl whitespace-nowrap text-center"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</a>'+
+    '</div>'+
+    (related.length?'<div class="mt-12"><h2 class="text-xl md:text-2xl font-bold text-gray-900 mb-5">Leia tamb\u00e9m</h2><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">'+related.map(blogCard).join('')+'</div></div>':'')+
+  '</div>';
+}
+
+// ============================================================
+// VIEW: SOBRE
+// ============================================================
+function renderAbout(){
+  return '<div class="max-w-5xl mx-auto px-4 py-10 md:py-16 fade-in">'+
+    '<section class="text-center mb-12">'+
+      '<img src="img/logo.gif" alt="Agrovel" class="h-16 md:h-20 w-auto mx-auto mb-6">'+
+      '<div class="inline-flex items-center gap-2 bg-amber-500 text-green-950 px-4 py-1.5 rounded-full text-sm font-bold mb-4 shadow"><i class="fas fa-medal"></i> Desde 1996 &bull; Iju&iacute; - RS</div>'+
+      '<h1 class="text-3xl md:text-5xl font-bold text-gray-900 mb-4">Mais que Produtos, <span class="text-green-700">Solu&ccedil;&otilde;es.</span></h1>'+
+      '<p class="text-gray-600 max-w-2xl mx-auto text-base md:text-lg leading-relaxed">A Agrovel Agro Veterin&aacute;ria h&aacute; mais de duas d&eacute;cadas atende produtores rurais, criadores e comunidades com medicamentos veterin&aacute;rios, nutri&ccedil;&atilde;o animal, equipamentos, sementes e ferramentas de qualidade comprovada, sempre com atendimento t&eacute;cnico especializado.</p>'+
+    '</section>'+
+    '<section class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12">'+
+      [
+        {icon:'fa-bullseye',title:'Miss&atilde;o',text:'Oferecer solu&ccedil;&otilde;es completas para a sa&uacute;de animal e o agroneg&oacute;cio, com produtos de proced&ecirc;ncia e atendimento t&eacute;cnico que geram confian&ccedil;a.'},
+        {icon:'fa-eye',title:'Vis&atilde;o',text:'Ser a refer&ecirc;ncia regional em produtos e tecnologias para o campo, acompanhando a evolu&ccedil;&atilde;o do agroneg&oacute;cio.'},
+        {icon:'fa-handshake',title:'Valores',text:'Qualidade, transpar&ecirc;ncia, respeito ao produtor e compromisso com o bem-estar animal em cada atendimento.'}
+      ].map(function(v){
+        return '<div class="bg-white rounded-2xl p-6 shadow-sm border border-green-100 text-center">'+
+          '<div class="w-12 h-12 bg-green-100 rounded-2xl flex items-center justify-center text-green-700 mx-auto mb-4"><i class="fas '+v.icon+' text-xl"></i></div>'+
+          '<h3 class="font-bold text-gray-900 mb-2">'+v.title+'</h3>'+
+          '<p class="text-sm text-gray-500 leading-relaxed">'+v.text+'</p>'+
+        '</div>';
+      }).join('')+
+    '</section>'+
+    '<section class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">'+
+      '<div class="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-green-100">'+
+        '<h3 class="font-bold text-gray-900 text-lg mb-4 flex items-center gap-2"><i class="fas fa-box-open text-green-600"></i>O que voc&ecirc; encontra na Agrovel</h3>'+
+        '<ul class="space-y-2.5 text-sm text-gray-600">'+
+          '<li class="flex items-start gap-2"><i class="fas fa-check-circle text-green-500 mt-0.5"></i>Ra&ccedil;&otilde;es e nutri&ccedil;&atilde;o animal para todas as esp&eacute;cies;</li>'+
+          '<li class="flex items-start gap-2"><i class="fas fa-check-circle text-green-500 mt-0.5"></i>Medicamentos veterin&aacute;rios com proced&ecirc;ncia e registro;</li>'+
+          '<li class="flex items-start gap-2"><i class="fas fa-check-circle text-green-500 mt-0.5"></i>Equipamentos, ferramentas e EPIs para o trabalho rural;</li>'+
+          '<li class="flex items-start gap-2"><i class="fas fa-check-circle text-green-500 mt-0.5"></i>Sementes e insumos para pastagens e lavouras;</li>'+
+          '<li class="flex items-start gap-2"><i class="fas fa-check-circle text-green-500 mt-0.5"></i>Farm&aacute;cia veterin&aacute;ria e itens para o seu pet.</li>'+
+        '</ul>'+
+      '</div>'+
+      '<div class="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-green-100">'+
+        '<h3 class="font-bold text-gray-900 text-lg mb-4 flex items-center gap-2"><i class="fas fa-map-marker-alt text-green-600"></i>Onde estamos</h3>'+
+        '<div class="space-y-2 text-sm text-gray-600 mb-4">'+
+          '<p><i class="fas fa-map-marker-alt text-green-500 mr-2"></i><strong>Endere&ccedil;o:</strong> Av. 21 de Abril, 1004 - Bairro Osvaldo Aranha, Iju&iacute; - RS</p>'+
+          '<p><i class="fas fa-phone text-green-500 mr-2"></i><strong>Telefone:</strong> (55) 3332-4124</p>'+
+          '<p><i class="fab fa-whatsapp text-green-500 mr-2"></i><strong>WhatsApp:</strong> (55) 99109-5001</p>'+
+          '<p><i class="fab fa-instagram text-green-500 mr-2"></i><strong>Instagram:</strong> @agrovelagroveterinaria</p>'+
+        '</div>'+
+        '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Quero saber mais sobre a Agrovel.')+'" target="_blank" rel="noopener" class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-3 rounded-xl transition-colors"><i class="fab fa-whatsapp"></i>Falar com a Agrovel</a>'+
+      '</div>'+
+    '</section>'+
+    '<section class="rounded-3xl bg-gradient-to-r from-green-900 to-emerald-800 p-8 md:p-12 text-center text-white">'+
+      '<h2 class="text-2xl md:text-3xl font-extrabold mb-3">Vamos conversar?</h2>'+
+      '<p class="text-green-200 max-w-xl mx-auto mb-6">Visite nossa loja, acompanhe o <button onclick="navigate(\'blog\')" class="text-amber-400 font-bold underline hover:text-amber-300">AGROVELinforma</button> e fique por dentro das novidades do agroneg&oacute;cio.</p>'+
+      '<button onclick="navigate(\'catalog\')" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-8 py-4 rounded-xl transition-colors"><i class="fas fa-store mr-2"></i>Ver o cat&aacute;logo</button>'+
+    '</section>'+
+  '</div>';
+}
+
+// ============================================================
 // ADMIN LAYOUT
 // ============================================================
 function renderAdmin(){
@@ -1425,6 +1792,7 @@ function renderAdmin(){
     {id:'promos',icon:'fa-bullhorn',label:'Promo\u00e7\u00f5es',role:'admin'},
     {id:'copilot',icon:'fa-robot',label:'Copilot IA',role:'admin'},
     {id:'whatsapp',icon:'fab fa-whatsapp',label:'WhatsApp',role:'admin'},
+    {id:'news',icon:'fa-newspaper',label:'Not\u00edcias',role:'admin'},
   ].filter(function(n){return n.role==='both'||(isAdm&&n.role==='admin')||(isSel&&n.role==='both')});
   return'<div class="flex h-screen bg-gray-50" id="admin-wrap">'+
     '<div class="admin-mobile-overlay" onclick="closeAdminSidebar()"></div>'+
@@ -1556,6 +1924,8 @@ function renderAdminSection(){
     case 'promos':el.innerHTML=renderAdminPromos();initPromoForm();resolveIdbMedia(el);break;
     case 'copilot':el.innerHTML=renderCopilotPage();initCopilotChart();break;
     case 'whatsapp':el.innerHTML=renderAdminWhatsApp();break;
+    case 'news':el.innerHTML=renderAdminNews();resolveIdbMedia(el);break;
+    case 'news-form':el.innerHTML=renderNewsForm(State.editNewsId);initNewsForm(State.editNewsId);resolveIdbMedia(el);break;
   }
   document.querySelectorAll('.admin-link').forEach(function(el){
     const key=el.id?el.id.replace('nav-',''):'';
@@ -2513,6 +2883,282 @@ function showPromoPopup(){
 function closePromoPopup(){
   var dv=document.getElementById('promo-popup');
   if(dv)dv.remove();
+}
+
+// ============================================================
+// ADMIN: NOTICIAS (AgrovelInforma)
+// ============================================================
+var _newsCover=null;
+var _newsVideo=null;
+var _newsDirHandle=null;
+
+async function saveNewsMediaToFolder(file){
+  if(!window.showDirectoryPicker) return null;
+  try{
+    var dir=_newsDirHandle;
+    if(!dir){
+      showToast('Selecione a pasta img/noticias na janela seguinte','warn');
+      dir=await window.showDirectoryPicker({mode:'readwrite'});
+      _newsDirHandle=dir;
+    }
+    var perm=await dir.queryPermission({mode:'readwrite'});
+    if(perm!=='granted') perm=await dir.requestPermission({mode:'readwrite'});
+    if(perm!=='granted') return null;
+    var safeName=Date.now()+'_'+file.name.replace(/[^A-Za-z0-9._-]+/g,'_');
+    var handle=await dir.getFileHandle(safeName,{create:true});
+    var w=await handle.createWritable();
+    await w.write(file);
+    await w.close();
+    return 'img/noticias/'+safeName;
+  }catch(e){return null}
+}
+
+function handleNewsCoverFile(input){
+  var f=input.files&&input.files[0];
+  if(!f) return;
+  if(f.type.indexOf('image/')!==0){showToast('Somente arquivos de imagem','warn');input.value='';return}
+  _newsCover=null;
+  var imgurl=document.getElementById('news-cover-url');
+  var saveResult=saveNewsMediaToFolder(f);
+  compressImage(f,function(src){
+    saveResult.then(function(path){
+      if(path){
+        _newsCover=path;
+        if(imgurl){imgurl.value=path;imgurl.placeholder='';}
+        showToast('Imagem salva em img/noticias');
+        updateMediaPreview();
+      } else if(_newsCover===null){
+        if(src.length>3500000){
+          storeMediaBlob(f,f.type||'image/jpeg',function(ref){
+            if(ref){_newsCover=ref;if(imgurl){imgurl.value='';imgurl.placeholder='Imagem carregada do dispositivo.';}}
+            else{_newsCover=src;if(imgurl){imgurl.value='';imgurl.placeholder='Imagem carregada do dispositivo.';}}
+            showToast('Imagem carregada');
+            updateMediaPreview();
+          });
+        } else {
+          _newsCover=src;
+          if(imgurl){imgurl.value='';imgurl.placeholder='Imagem carregada do dispositivo.';}
+          showToast('Imagem carregada');
+          updateMediaPreview();
+        }
+      }
+    });
+  });
+  input.value='';
+}
+
+function handleNewsVideoFile(input){
+  var f=input.files&&input.files[0];
+  if(!f) return;
+  if(f.type.indexOf('video/')!==0){showToast('Somente arquivos de video','warn');input.value='';return}
+  _newsVideo=null;
+  var vid=document.getElementById('news-video');
+  showToast('Enviando video, aguarde...');
+  saveNewsMediaToFolder(f).then(function(path){
+    if(path){
+      _newsVideo=path;
+      if(vid){vid.value=path;vid.placeholder='';}
+      showToast('Video salvo em img/noticias');
+      updateMediaPreview();
+    } else {
+      storeMediaBlob(f,f.type||'video/mp4',function(ref){
+        if(ref){_newsVideo=ref;if(vid){vid.value='';vid.placeholder='Video carregado do dispositivo.';}showToast('Video carregado');updateMediaPreview();}
+        else{showToast('Falha ao carregar o video','error');}
+      });
+    }
+  });
+  input.value='';
+}
+
+function updateMediaPreview(){
+  var el=document.getElementById('news-media-preview');
+  if(!el) return;
+  var cur=DB.news().find(function(x){return x.id===State.editNewsId});
+  var cover=_newsCover||document.getElementById('news-cover-url').value.trim()||(cur&&cur.cover)||'';
+  var video=_newsVideo||document.getElementById('news-video').value.trim()||(cur&&cur.video)||'';
+  if(!cover&&!video){el.innerHTML='<span class="text-xs text-gray-400">Sem midia. Adicione uma capa e/ou video.</span>';return;}
+  el.innerHTML=mediaEl({image:cover,video:video});
+  resolveIdbMedia(el);
+}
+
+function updateNewsPreview(){
+  var ta=document.getElementById('news-content');
+  var pv=document.getElementById('news-preview');
+  if(!ta||!pv) return;
+  pv.innerHTML=newsToHtml(ta.value)||'<span class="text-gray-400">Pre-visualizacao vazia.</span>';
+}
+
+function renderAdminNews(){
+  var news=DB.news()||[];
+  var sorted=news.slice().sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
+  return '<div class="p-4 md:p-8 fade-in">'+
+    '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Not\u00edcias / Blog</h1><p class="text-gray-400 text-sm">'+news.length+' publica\u00e7\u00f5es no AGROVELinforma</p></div>'+
+      '<button onclick="startNewsForm(null)" class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors flex items-center gap-2 text-sm"><i class="fas fa-plus"></i>Nova Not\u00edcia</button>'+
+    '</div>'+
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">'+
+      '<table class="w-full min-w-[720px]">'+
+        '<thead class="bg-gray-50 border-b border-gray-100">'+
+          '<tr><th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Publica\u00e7\u00e3o</th>'+
+          '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Categoria</th>'+
+          '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Data</th>'+
+          '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Views</th>'+
+          '<th class="px-5 py-4 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>'+
+          '<th class="px-5 py-4 text-center text-xs font-semibold text-gray-500 uppercase">A\u00e7\u00f5es</th></tr>'+
+        '</thead>'+
+        '<tbody>'+
+          sorted.map(function(n){return '<tr class="border-b border-gray-50 hover:bg-green-50/30 transition-colors">'+
+            '<td class="px-5 py-4"><div class="flex items-center gap-3">'+
+              '<div class="w-14 h-12 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">'+newsCoverImg(n,'w-full h-full object-cover')+'</div>'+
+              '<div><div class="font-medium text-gray-900 text-sm max-w-[280px] truncate">'+esc(n.title)+'</div>'+
+              '<div class="text-xs text-gray-400">'+(n.featured?'<span class="text-amber-600 font-medium mr-2"><i class="fas fa-star mr-0.5"></i>Destaque</span>':'')+(n.video?'<span class="text-red-500"><i class="fas fa-video mr-0.5"></i>V\u00eddeo</span>':'')+'</div></div></div></td>'+
+            '<td class="px-5 py-4"><span class="text-xs bg-green-100 text-green-700 px-2.5 py-1 rounded-full font-medium">'+esc(n.category||'Not\u00edcias')+'</span></td>'+
+            '<td class="px-5 py-4 text-sm text-gray-600">'+newsDate(n.createdAt)+'</td>'+
+            '<td class="px-5 py-4 text-sm font-bold text-gray-800">'+(n.views||0)+'</td>'+
+            '<td class="px-5 py-4">'+
+              '<button onclick="toggleNewsActive(\''+n.id+'\')" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors '+(n.active?'bg-green-100 text-green-700 hover:bg-green-200':'bg-red-100 text-red-700 hover:bg-red-200')+'">'+(n.active?'Ativa':'Inativa')+'</button>'+
+            '</td>'+
+            '<td class="px-5 py-4"><div class="flex items-center justify-center gap-2">'+
+              '<button onclick="navigate(\'blog-post\',{newsId:\''+n.id+'\'})" title="Visualizar" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><i class="fas fa-eye text-sm"></i></button>'+
+              '<button onclick="startNewsForm(\''+n.id+'\')" title="Editar" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"><i class="fas fa-edit text-sm"></i></button>'+
+              '<button onclick="deleteNews(\''+n.id+'\')" title="Excluir" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"><i class="fas fa-trash text-sm"></i></button>'+
+            '</div></td>'+
+          '</tr>'}).join('')+
+        '</tbody>'+
+      '</table>'+
+      (news.length===0?'<div class="p-10 text-center text-gray-400"><div class="text-5xl mb-3"><i class="fas fa-newspaper"></i></div><p>Nenhuma not\u00edcia cadastrada. Clique em "Nova Not\u00edcia" para come\u00e7ar.</p></div>':'')+
+    '</div>'+
+  '</div>';
+}
+
+function renderNewsForm(id){
+  var n=id?DB.news().find(function(x){return x.id===id}):null;
+  function v(key){return n?n[key]||'':''}
+  function vlist(key){return n&&Array.isArray(n[key])&&n[key].length?n[key].join(', '):''}
+  return '<div class="p-4 md:p-8 fade-in max-w-3xl">'+
+    '<div class="flex items-center gap-3 mb-6">'+
+      '<button onclick="switchAdminSection(\'news\')" class="text-gray-400 hover:text-gray-700 transition-colors"><i class="fas fa-arrow-left text-lg"></i></button>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">'+(n?'Editar':'Nova')+' Not\u00edcia</h1><p class="text-gray-400 text-sm">'+(n?'Publicada em '+newsDate(n.createdAt):'Preencha os dados da publica\u00e7\u00e3o')+'</p></div>'+
+    '</div>'+
+    '<form onsubmit="saveNews(event,\''+(id||'')+'\')" class="space-y-6">'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-4">Conte\u00fado</h3>'+
+        '<div class="space-y-4">'+
+          '<div><label class="text-sm text-gray-600 mb-1 block">T\u00edtulo da Not\u00edcia *</label>'+
+            '<input name="title" required value="'+esc(v('title'))+'" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="Ex: Calend\u00e1rio sanit\u00e1rio do gado de corte em 2026"></div>'+
+          '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">'+
+            '<div><label class="text-sm text-gray-600 mb-1 block">Categoria</label>'+
+              '<select name="category" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none bg-white cursor-pointer">'+
+                NEWS_CATEGORIES.map(function(c){return '<option '+(v('category')===c?'selected':'')+'>'+c+'</option>'}).join('')+
+              '</select></div>'+
+            '<div><label class="text-sm text-gray-600 mb-1 block">Tags (separadas por v\u00edrgula)</label>'+
+              '<input name="tags" value="'+esc(vlist('tags'))+'" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none" placeholder="bovinos, sanidade, vacina"></div>'+
+          '</div>'+
+          '<div><label class="text-sm text-gray-600 mb-1 block">Resumo (aparece nos cards do blog)</label>'+
+            '<textarea name="excerpt" rows="3" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none resize-none" placeholder="Resumo curto da publica\u00e7\u00e3o...">'+esc(v('excerpt'))+'</textarea></div>'+
+          '<div><label class="text-sm text-gray-600 mb-1 block">Conte\u00fado da Not\u00edcia *</label>'+
+            '<div class="mb-2 text-xs text-gray-400 bg-green-50 border border-green-100 rounded-xl px-3 py-2 leading-relaxed">Formata\u00e7\u00e3o r\u00e1pida: use <code># T\u00edtulo</code> e <code>## Subt\u00edtulo</code> para t\u00edtulos, linhas com <code>- item</code> viram listas, <code>**negrito**</code> e links <code>[texto](url)</code>.</div>'+
+            '<textarea name="content" id="news-content" required rows="10" oninput="updateNewsPreview()" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none resize-y font-mono text-sm" placeholder="Escreva aqui o conte\u00fado da not\u00edcia...">'+esc(v('content'))+'</textarea></div>'+
+          '<div>'+
+            '<label class="text-sm text-gray-600 mb-1 block font-medium">Pr\u00e9-visualiza\u00e7\u00e3o</label>'+
+            '<div id="news-preview" class="border border-gray-200 rounded-xl p-4 bg-gray-50 text-sm overflow-auto max-h-80">'+newsToHtml(v('content'))+'</div>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+      '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<h3 class="font-bold text-gray-800 mb-4">M\u00eddia</h3>'+
+        '<p class="text-xs text-gray-400 mb-4">A capa \u00e9 a imagem principal do card. O v\u00eddeo pode ser do YouTube, de uma URL (.mp4) ou enviado do dispositivo &mdash; ele aparece dentro da publica\u00e7\u00e3o.</p>'+
+        '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">'+
+          '<div><label class="text-sm text-gray-600 mb-1 block">Capa (URL ou upload)</label>'+
+            '<input id="news-cover-url" type="text" oninput="updateMediaPreview()" placeholder="https://.../capa.jpg" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none mb-2">'+
+            '<input type="file" id="news-cover-file" accept="image/*" class="hidden" onchange="handleNewsCoverFile(this)">'+
+            '<button type="button" onclick="document.getElementById(\'news-cover-file\').click()" class="w-full text-sm bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl border border-green-200 transition-colors"><i class="fas fa-cloud-upload-alt mr-1.5"></i>Enviar capa do dispositivo</button></div>'+
+          '<div><label class="text-sm text-gray-600 mb-1 block">V\u00eddeo (YouTube, URL ou upload)</label>'+
+            '<input id="news-video" type="text" oninput="updateMediaPreview()" placeholder="https://www.youtube.com/watch?v=... ou https://.../video.mp4" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none mb-2">'+
+            '<input type="file" id="news-video-file" accept="video/*" class="hidden" onchange="handleNewsVideoFile(this)">'+
+            '<button type="button" onclick="document.getElementById(\'news-video-file\').click()" class="w-full text-sm bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl border border-green-200 transition-colors"><i class="fas fa-cloud-upload-alt mr-1.5"></i>Enviar v\u00eddeo do dispositivo</button></div>'+
+        '</div>'+
+        '<div class="mt-4 p-3 bg-gray-50 border border-gray-100 rounded-xl" id="news-media-preview"></div>'+
+      '</div>'+
+      '<div class="flex items-center gap-6 flex-wrap bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100">'+
+        '<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="featured" '+(n&&n.featured?'checked':'')+' class="w-4 h-4 rounded accent-green-500"><span class="text-sm text-gray-700">Publica\u00e7\u00e3o em Destaque</span></label>'+
+        '<label class="flex items-center gap-2 cursor-pointer"><input type="checkbox" name="active" '+(!n||n.active?'checked':'')+' class="w-4 h-4 rounded accent-green-500"><span class="text-sm text-gray-700">Publica\u00e7\u00e3o Ativa</span></label>'+
+      '</div>'+
+      '<div class="flex gap-4">'+
+        '<button type="submit" class="flex-1 bg-green-600 hover:bg-green-500 text-white font-bold py-3.5 rounded-xl transition-all hover:shadow-lg"><i class="fas fa-save mr-2"></i>'+(n?'Salvar Altera\u00e7\u00f5es':'Publicar Not\u00edcia')+'</button>'+
+        '<button type="button" onclick="switchAdminSection(\'news\')" class="px-6 py-3.5 border border-gray-200 rounded-xl hover:bg-gray-50 text-gray-600 font-medium transition-colors">Cancelar</button>'+
+      '</div>'+
+    '</form>'+
+  '</div>';
+}
+
+function initNewsForm(id){
+  var n=id?DB.news().find(function(x){return x.id===id}):null;
+  _newsCover=null;
+  _newsVideo=null;
+  if(n){if(n.cover)_newsCover=n.cover;if(n.video)_newsVideo=n.video;}
+  var cu=document.getElementById('news-cover-url');
+  if(cu) cu.value=(n&&n.cover&&String(n.cover).indexOf('data:')!==0&&String(n.cover).indexOf('idb:')!==0)?n.cover:'';
+  var nv=document.getElementById('news-video');
+  if(nv) nv.value=(n&&n.video&&String(n.video).indexOf('data:')!==0&&String(n.video).indexOf('idb:')!==0)?n.video:'';
+  updateMediaPreview();
+  updateNewsPreview();
+}
+
+function startNewsForm(id){State.adminSection='news-form';State.editNewsId=id;renderAdminSection();}
+
+function saveNews(e,id){
+  e.preventDefault();
+  var f=new FormData(e.target);
+  var title=f.get('title').trim();
+  if(!title){showToast('Informe o t\u00edtulo da not\u00edcia','warn');return}
+  var cover=_newsCover||document.getElementById('news-cover-url').value.trim()||null;
+  var video=_newsVideo||document.getElementById('news-video').value.trim()||null;
+  var featured=f.get('featured')==='on';
+  var active=f.get('active')==='on';
+  var data={
+    title:title,
+    category:f.get('category')||'Not\u00edcias',
+    excerpt:f.get('excerpt')||'',
+    content:f.get('content')||'',
+    tags:(f.get('tags')||'').split(',').map(function(t){return t.trim()}).filter(Boolean),
+    cover:cover,
+    video:video||null,
+    featured:featured,
+    active:active
+  };
+  var news=DB.news();
+  if(id){
+    var idx=news.findIndex(function(x){return x.id===id});
+    if(idx>=0){
+      var old=news[idx];
+      if(String(old.cover||'').indexOf('idb:')===0&&old.cover!==cover)deleteMediaBlob(old.cover);
+      if(String(old.video||'').indexOf('idb:')===0&&old.video!==video)deleteMediaBlob(old.video);
+      news[idx]=Object.assign({},news[idx],data);
+    }
+    showToast('Not\u00edcia atualizada com sucesso!');
+  } else {
+    news.unshift(Object.assign({id:'n'+genId()},data,{author:DB.currentUser()?DB.currentUser().name:'Equipe Agrovel',views:0,createdAt:new Date().toISOString()}));
+    showToast('Not\u00edcia cadastrada com sucesso!');
+  }
+  if(DB.setNews(news)) switchAdminSection('news');
+}
+
+function toggleNewsActive(id){
+  var news=DB.news();
+  var n=news.find(function(x){return x.id===id});
+  if(n){n.active=!n.active;DB.setNews(news);renderAdminSection();showToast(n.active?'Not\u00edcia ativada!':'Not\u00edcia desativada','info');}
+}
+
+function deleteNews(id){
+  if(!confirm('Tem certeza que deseja excluir esta not\u00edcia?')) return;
+  var target=DB.news().find(function(x){return x.id===id});
+  if(target){deleteMediaBlob(target.cover);deleteMediaBlob(target.video);}
+  var news=DB.news().filter(function(x){return x.id!==id});
+  DB.setNews(news);
+  if(State.editNewsId===id){State.editNewsId=null;_newsCover=null;_newsVideo=null;}
+  showToast('Not\u00edcia exclu\u00edda','warn');
+  renderAdminSection();
 }
 
 // ============================================================
