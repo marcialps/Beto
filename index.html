@@ -400,7 +400,7 @@ const DEFAULT_ORDERS = [
 const DB = (function(){
   const mem = {};                       // cache em memoria (espelho)
   const fire = { db: null };            // instancia do Firestore
-  const COLL = ['products','orders','customers','users','categories','promos','events','cart','filters','currentUser','news'];
+  const COLL = ['products','orders','customers','users','categories','promos','events','cart','currentUser','news'];
   const pending = {};
   const timers = {};
 
@@ -493,8 +493,18 @@ const DB = (function(){
     setCart(v){ mem['cart']=v; persist('cart'); return true; },
     currentUser(){return this.g('currentUser')},
     setCurrentUser(v){ mem['currentUser']=v; persist('currentUser'); return true; },
-    filters(){return this.g('filters')||{category:'',species:'',brand:'',search:'',sort:'featured'}},
-    setFilters(v){ mem['filters']=v; persist('filters'); return true; },
+    filters(){
+      var def={category:'',species:'',brand:'',search:'',sort:'featured'};
+      try{
+        var raw=localStorage.getItem('agrovel_filters');
+        if(raw) return Object.assign({},def,JSON.parse(raw));
+      }catch(e){}
+      return def;
+    },
+    setFilters(v){
+      try{ localStorage.setItem('agrovel_filters', JSON.stringify(v||{category:'',species:'',brand:'',search:'',sort:'featured'})); }catch(e){}
+      return true;
+    },
     promos(){return this.g('promos')||[]},
     setPromos(v){ mem['promos']=v; persist('promos'); return true; },
     events(){return this.g('events')||DEFAULT_EVENTS},
