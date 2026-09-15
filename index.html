@@ -12,6 +12,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="firebase-config.js"></script>
 <style>
   body{font-family:system-ui,-apple-system,sans-serif;background:#f0fdf4}
@@ -1495,18 +1496,62 @@ function renderLogin(){
 }
 function fillLogin(e,p){document.querySelector('#login-form [name=email]').value=e;document.querySelector('#login-form [name=password]').value=p}
 function togglePw(){const i=document.getElementById('pw');i.type=i.type==='password'?'text':'password'}
-function doLogin(e){
+function fbAuthAvailable(){return !!(window.firebase&&firebase.auth)}
+function showLoginError(msg){
+  const el=document.getElementById('login-error');
+  if(!el)return;
+  el.classList.remove('hidden');el.textContent=msg;
+}
+function initAuth(){
+  if(!fbAuthAvailable())return;
+  firebase.auth().onAuthStateChanged(function(user){
+    const users=DB.users();
+    if(user){
+      const u=users.find(function(x){return x.email===user.email});
+      if(u){DB.setCurrentUser(u);renderUserMenu();}
+      else{firebase.auth().signOut().catch(function(){});}
+    }else{
+      if(DB.currentUser()){DB.setCurrentUser(null);renderUserMenu();}
+    }
+  });
+}
+async function doLogin(e){
   e.preventDefault();
   const f=new FormData(e.target);
   const users=DB.users();
   const u=users.find(function(x){return x.email===f.get('email')&&x.password===f.get('password')});
-  if(!u){document.getElementById('login-error').classList.remove('hidden');document.getElementById('login-error').textContent='E-mail ou senha incorretos.';return}
+  if(!u){showLoginError('E-mail ou senha incorretos.');return}
+  const email=f.get('email'),pass=f.get('password');
+  if(fbAuthAvailable()){
+    try{
+      try{
+        await firebase.auth().signInWithEmailAndPassword(email,pass);
+      }catch(err){
+        if(err.code==='auth/user-not-found'){
+          try{
+            await firebase.auth().createUserWithEmailAndPassword(email,pass);
+          }catch(err2){
+            if(err2.code==='auth/email-already-in-use'){
+              await firebase.auth().signInWithEmailAndPassword(email,pass);
+            }else{throw err2}
+          }
+        }else if(err.code==='auth/wrong-password'||err.code==='auth/invalid-credential'||err.code==='auth/user-disabled'){
+          showLoginError('Senha incorreta ou conta desativada.');return;
+        }else{throw err}
+      }
+    }catch(err){
+      console.error('FB auth error',err);
+      showLoginError('Erro ao autenticar no Firebase. Verifique a conexao ou se o login com e-mail/senha esta habilitado no console.');
+      return;
+    }
+  }
   DB.setCurrentUser(u);
   showToast('Bem-vindo, '+u.name+'!');
   if(u.role==='guest') navigate('catalog');
   else navigate('admin');
 }
-function logout(){DB.setCurrentUser(null);navigate('catalog');showToast('Ate logo!')}
+function logout(){if(fbAuthAvailable()){try{firebase.auth().signOut()}catch(e){}}
+  DB.setCurrentUser(null);navigate('catalog');showToast('Ate logo!')}
 
 // ============================================================
 // VIEW: BLOG (AgrovelInforma)
@@ -3934,6 +3979,7 @@ window.addEventListener('DOMContentLoaded', async function(){
     const db = firebase.firestore();
     DB._setFire(db);
     await DB._loadAll();
+    initAuth();
   }catch(e){
     console.error('Firebase init error', e);
     setTimeout(function(){showToast('Erro ao conectar ao Firebase. Verifique sua conexao/internet.','error')},10);
