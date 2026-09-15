@@ -979,7 +979,7 @@ function renderCatalog(){
     '</div>'+
 
     '<div class="flex flex-col lg:flex-row gap-8">'+
-      '<aside class="lg:w-64 flex-shrink-0">'+
+      '<aside id="catalog-filters-aside" class="lg:w-64 flex-shrink-0'+(filters.search?' hidden lg:block':'')+'">'+
         '<div class="bg-white rounded-2xl shadow-sm border border-green-100 p-5 sticky top-24">'+
           '<div class="flex items-center justify-between mb-4">'+
             '<h3 class="font-bold text-gray-800">Filtros</h3>'+
@@ -1087,6 +1087,10 @@ function updateCatalogResults(){
 
   var cw=document.getElementById('catalog-carousel-wrap');
   if(cw) cw.style.display=(filters.category||filters.search||filters.species||filters.brand)?'none':'block';
+
+  var aside=document.getElementById('catalog-filters-aside');
+  if(aside) aside.classList.toggle('hidden',!!(filters.search));
+  if(aside) aside.classList.toggle('lg:block',!!(filters.search));
 
   var html=((filters.category||filters.species||filters.brand||filters.search)?'<div class="flex items-center flex-wrap gap-2 mb-5">'+
     (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
