@@ -159,7 +159,7 @@
           </button>
         </div>
         <nav class="hidden md:flex items-center gap-6 text-sm">
-          <button onclick="navigate('catalog')" class="hover:text-green-300 transition-colors font-medium">Catalogo</button>
+          <button onclick="navigate('catalog')" class="hover:text-green-300 transition-colors font-medium flex items-center gap-1.5"><i class="fas fa-store text-green-400"></i>CATÁLOGO</button>
           <span id="header-cat-nav"></span>
         </nav>
         <div class="flex items-center gap-2 md:gap-3">
@@ -1228,10 +1228,6 @@ function renderProductDetail(id){
         '<h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-3">'+p.name+'</h1>'+
         '<div class="rounded-2xl border border-green-200 bg-green-50 p-4 mb-6">'+
           '<p class="text-sm font-semibold text-green-700 mb-2"><i class="fab fa-whatsapp mr-2"></i>Valores e disponibilidade sob consulta</p>'+
-          '<p class="text-sm text-gray-600 mb-4">Entre em contato com um vendedor e informe o código do produto para receber orientaçao comercial personalizada.</p>'+
-          '<div class="flex flex-wrap gap-3">'+
-            '<button onclick="orderWhatsApp(\''+p.id+'\')" class="bg-green-600 hover:bg-green-500 text-white font-semibold px-4 py-2.5 rounded-xl transition-all"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</button>'+
-          '</div>'+
         '</div>'+
         '<p class="text-gray-600 leading-relaxed mb-4">'+p.description+'</p>'+
         (p.species?'<div class="flex items-center gap-2 mb-4"><i class="fas fa-paw text-green-500"></i><span class="text-sm font-medium text-gray-700">Especie: <strong>'+p.species+'</strong></span></div>':'')+
@@ -1904,13 +1900,13 @@ function renderAbout(){
       '<img src="img/logo.gif" alt="Agrovel" class="h-16 md:h-20 w-auto mx-auto mb-6">'+
       '<div class="inline-flex items-center gap-2 bg-amber-500 text-green-950 px-4 py-1.5 rounded-full text-sm font-bold mb-4 shadow"><i class="fas fa-medal"></i> Desde 1996 &bull; Iju&iacute; - RS</div>'+
       '<h1 class="text-3xl md:text-5xl font-bold text-gray-900 mb-4">Mais que Produtos, <span class="text-green-700">Solu&ccedil;&otilde;es.</span></h1>'+
-      '<p class="text-gray-600 max-w-2xl mx-auto text-base md:text-lg leading-relaxed">A Agrovel Agroveterinária h&aacute; mais de três d&eacute;cadas atende produtores rurais, criadores e comunidades com medicamentos veterin&aacute;rios, nutri&ccedil;&atilde;o animal, equipamentos, sementes e ferramentas de qualidade comprovada, sempre com atendimento t&eacute;cnico especializado.</p>'+
+      '<p class="text-gray-600 max-w-2xl mx-auto text-base md:text-lg leading-relaxed">Há 30 anos a Agrovel Agroveterinária caminha lado a lado com o produtor rural, o criador e quem cuida dos animais. Oferecemos medicamentos veterinários, nutrição animal, equipamentos e insumos com procedência garantida e atendimento técnico especializado.</p>'+
     '</section>'+
     '<section class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12">'+
       [
-        {icon:'fa-bullseye',title:'Miss&atilde;o',text:'Oferecer solu&ccedil;&otilde;es completas para a sa&uacute;de animal e o agroneg&oacute;cio, com produtos de proced&ecirc;ncia e atendimento t&eacute;cnico que geram confian&ccedil;a.'},
-        {icon:'fa-eye',title:'Vis&atilde;o',text:'Ser a refer&ecirc;ncia regional em produtos e tecnologias para o campo, acompanhando a evolu&ccedil;&atilde;o do agroneg&oacute;cio.'},
-        {icon:'fa-handshake',title:'Valores',text:'Qualidade, transpar&ecirc;ncia, respeito ao produtor e compromisso com o bem-estar animal em cada atendimento.'}
+        {icon:'fa-bullseye',title:'Miss&atilde;o',text:'Oferecer soluções completas para a saúde animal e o agronegócio, unindo produtos de qualidade, orientação técnica e atendimento próximo, gerando confiança e resultados no campo.'},
+        {icon:'fa-eye',title:'Vis&atilde;o',text:'Ser referência regional em produtos e tecnologias para o agronegócio, acompanhando a evolução do setor e contribuindo para o sucesso de quem produz.'},
+        {icon:'fa-handshake',title:'Valores',text:'Qualidade, transparência, respeito ao produtor e compromisso com o bem-estar animal em cada atendimento.'}
       ].map(function(v){
         return '<div class="bg-white rounded-2xl p-6 shadow-sm border border-green-100 text-center">'+
           '<div class="w-12 h-12 bg-green-100 rounded-2xl flex items-center justify-center text-green-700 mx-auto mb-4"><i class="fas '+v.icon+' text-xl"></i></div>'+
@@ -1938,6 +1934,7 @@ function renderAbout(){
           '<p><i class="fab fa-whatsapp text-green-500 mr-2"></i><strong>WhatsApp:</strong> (55) 99109-5001</p>'+
           '<p><i class="fab fa-instagram text-green-500 mr-2"></i><strong>Instagram:</strong> @agrovelagroveterinaria</p>'+
         '</div>'+
+        '<p class="text-sm italic text-gray-500 border-l-2 border-green-300 pl-3 mb-4 leading-relaxed">Somos de Iju&iacute; &ndash; RS, prontos para atender voc&ecirc; com a mesma dedica&ccedil;&atilde;o de sempre. Fale conosco e descubra como podemos ajudar no seu dia a dia.</p>'+
         '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Quero saber mais sobre a Agrovel.')+'" target="_blank" rel="noopener" class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-3 rounded-xl transition-colors"><i class="fab fa-whatsapp"></i>Falar com a Agrovel</a>'+
       '</div>'+
     '</section>'+
