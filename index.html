@@ -1644,11 +1644,10 @@ function renderLogin(){
         '<div id="login-error" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4"></div>'+
         '<form id="login-form" onsubmit="doLogin(event)" class="space-y-5">'+
           '<div><label class="text-sm font-medium text-gray-700 block mb-1.5">E-mail</label>'+
-            '<input name="email" type="email" required placeholder="seu@email.com" value="beto@agrovel.com"'+
-              'class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none transition-all"></div>'+
+            '<input name="email" type="email" required placeholder="seu@email.com" autocomplete="off" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none transition-all"></div>'+
           '<div><label class="text-sm font-medium text-gray-700 block mb-1.5">Senha</label>'+
             '<div class="relative">'+
-              '<input name="password" id="pw" type="password" required placeholder="******" value="admin123"'+
+              '<input name="password" id="pw" type="password" required placeholder="******" autocomplete="off" '+
                 'class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none transition-all pr-12">'+
               '<button type="button" onclick="togglePw()" class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"><i class="fas fa-eye text-sm"></i></button>'+
             '</div></div>'+
@@ -1669,14 +1668,14 @@ function showLoginError(msg){
 }
 function initAuth(){
   if(!fbAuthAvailable())return;
+  firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
   firebase.auth().onAuthStateChanged(function(user){
-    const users=DB.users();
     if(user){
-      const u=users.find(function(x){return x.email===user.email});
+      const u=DB.users().find(function(x){return x.email===user.email});
       if(u){DB.setCurrentUser(u);renderUserMenu();}
       else{firebase.auth().signOut().catch(function(){});}
-    }else{
-      if(DB.currentUser()){DB.setCurrentUser(null);renderUserMenu();}
+    }else if(!DB.currentUser()){
+      renderUserMenu();
     }
   });
 }
