@@ -398,6 +398,9 @@ const DB = (function(){
   const pending = {};
   const timers = {};
 
+  var ANALYTICS_VERSION = 2;
+  function eventsMeta(){ return {analyticsVersion: ANALYTICS_VERSION}; }
+
   function defaultFor(key){
     switch(key){
       case 'products': return DEFAULT_PRODUCTS;
@@ -426,11 +429,20 @@ const DB = (function(){
         const ref = docRef(key);
         if(!ref){ mem[key]=defaultFor(key); return; }
         const snap = await ref.get();
-        if(snap.exists && snap.data() && snap.data().v!==undefined){
-          mem[key] = snap.data().v;
+        const data = (snap.exists && snap.data()) ? snap.data() : {};
+        if(data.v!==undefined){
+          if(key==='events' && !data.meta){
+            // eventos legados sem marcador de versao = semente ficticia antiga;
+            // descarta e passa a coletar apenas dados reais a partir de agora.
+            mem[key] = [];
+            await ref.set({v:[], meta:eventsMeta()});
+          } else {
+            mem[key] = data.v;
+          }
         } else {
           mem[key] = defaultFor(key);
-          await ref.set({v:mem[key]});
+          if(key==='events') await ref.set({v:mem[key], meta:eventsMeta()});
+          else await ref.set({v:mem[key]});
         }
       }catch(err){
         console.error('FB load '+key, err);
@@ -447,7 +459,8 @@ const DB = (function(){
     delete pending[key];
     const ref=docRef(key);
     if(!ref) return;
-    ref.set({v:val}).catch(function(err){
+    const payload = (key==='events') ? {v:val, meta:eventsMeta()} : {v:val};
+    ref.set(payload).catch(function(err){
       console.error('FB write '+key, err);
       setTimeout(function(){showToast('Erro ao salvar "'+key+'" no Firebase. Verifique sua conexao.','error')},10);
     });
@@ -527,37 +540,10 @@ const DB = (function(){
 // ANALYTICS - Rastreamento de interacoes (views, buscas, consultas)
 // ============================================================
 // Eventos: page_view | product_view | search | filter | whatsapp | contact | promo_view
-function genAnalyticsSeed(){
-  if(!DEFAULT_PRODUCTS||!DEFAULT_PRODUCTS.length)return[];
-  var now=Date.now(),DAY=86400000;
-  var terms=['Racao','Racao para caes','Pulverizador','Vermifugo','Vacina V8','Vacina','NPK 10-10-10','Sementes milho','Bota rural','Luva de raspa','Bebedouro','Cerca eletrica','Carrapaticida','Suplemento mineral','Enxada','Racao para gatos','Shampoo pet','Kong','Cobertura para caes','Podador'];
-  var kinds=['search','search','search','product_view','product_view','product_view','product_view','filter','filter','whatsapp','whatsapp','contact'];
-  var out=[];
-  function pick(a){return a[Math.floor(Math.random()*a.length)]}
-  function rnd(n){return Math.floor(Math.random()*n)}
-  for(var d=27;d>=0;d--){
-    var dayTs=new Date(now-d*DAY);
-    var dow=dayTs.getDay();
-    var base=8+rnd(16);
-    if(dow===0||dow===6)base=Math.round(base*1.35);
-    for(var i=0;i<base;i++){
-      var t=pick(kinds);
-      var p=DEFAULT_PRODUCTS[rnd(DEFAULT_PRODUCTS.length)];
-      var hour=8+rnd(13);
-      var ts=new Date(now-d*DAY).setHours(hour,rnd(60),rnd(60),0);
-      var e={id:genId(),ts:ts};
-      if(t==='search'){e.type='search';e.term=pick(terms)}
-      else if(t==='product_view'){e.type='product_view';e.productId=p.id;e.name=p.name;e.brand=p.brand||'';e.category=p.category}
-      else if(t==='filter'){e.type='filter';if(rnd(2)){e.kind='brand';e.value=p.brand||p.category}else{e.kind='category';e.value=p.category}}
-      else if(t==='whatsapp'){e.type='whatsapp';e.productId=p.id;e.name=p.name;e.brand=p.brand||'';e.category=p.category}
-      else{e.type='contact';e.interest=p.category}
-      out.push(e);
-    }
-  }
-  out.sort(function(a,b){return a.ts-b.ts});
-  return out;
-}
-var DEFAULT_EVENTS=genAnalyticsSeed();
+// Analytics parte de zero: nenhum dado ficticio e gerado.
+// O dashboard e alimentado apenas por eventos reais (trackEvent)
+// disparados pela navegacao do publico no proprio site.
+var DEFAULT_EVENTS=[];
 
 function trackEvent(type,data){
   data=data||{};
@@ -565,7 +551,7 @@ function trackEvent(type,data){
     var ev={id:genId(),type:type,ts:Date.now()};
     for(var k in data){if(data[k]!==undefined&&data[k]!==null&&data[k]!=='')ev[k]=data[k]}
     var stored=DB.g('events');
-    var arr=Array.isArray(stored)?stored.slice():[].concat(DEFAULT_EVENTS||[]);
+    var arr=Array.isArray(stored)?stored.slice():[];
     arr.push(ev);
     if(arr.length>4000)arr=arr.slice(-4000);
     DB.s('events',arr);
@@ -2032,22 +2018,35 @@ function renderDashboard(){
   var insights=[];
   if(curI>0){
     insights.push({icon:'fa-calendar-check',color:'bg-violet-100 text-violet-600',title:'Melhor dia para publicar',
-      text:''+dowNames[bestDay]+' concentra a maior interacao ('+dowCounts[bestDay]+' eventos). Publique ofertas e atualizacoes no catalogo proximo deste dia.'});
+      text:''+dowNames[bestDay]+' concentra a maior interacao ('+dowCounts[bestDay]+' eventos). Publique ofertas e atualizacoes no catalogo proximo deste dia.',
+      action:"switchAdminSection('promos')",actionLabel:'Planejar ofertas'});
     if(curW>0)insights.push({icon:'fa-bullhorn',color:'bg-amber-100 text-amber-600',title:'Consultas em alta',
       text:curW+' clientes pediram condicoes pelo WhatsApp. Taxa de conversao de visualizacao: '+anPct(curW,vEv.length)+'. Responda rapido para nao perder vendas.'});
     if(sTerms.length)insights.push({icon:'fa-search',color:'bg-blue-100 text-blue-600',title:'Top busca: "'+sTerms[0][0]+'"',
-      text:'Termo pesquisado '+sTerms[0][1]+'x. Confira se os produtos correspondentes estao bem posicionados e em destaque no catalogo.'});
+      text:'Termo pesquisado '+sTerms[0][1]+'x. Confira se os produtos correspondentes estao bem posicionados e em destaque no catalogo.',
+      action:"switchAdminSection('products')",actionLabel:'Revisar produtos'});
     if(unmatchedTerms.length)insights.push({icon:'fa-exclamation-triangle',color:'bg-orange-100 text-orange-600',title:'Demanda sem produto',
-      text:'O termo "'+unmatchedTerms[0][0]+'" nao encontrou resultado no catalogo ('+unmatchedTerms[0][1]+' buscas). Avalie adicionar um produto ou sinonimo.'});
+      text:'O termo "'+unmatchedTerms[0][0]+'" nao encontrou resultado no catalogo ('+unmatchedTerms[0][1]+' buscas). Avalie adicionar um produto ou sinonimo.',
+      action:'startProductForm(null)',actionLabel:'Cadastrar produto'});
+    if(topCats.length)insights.push({icon:'fa-layer-group',color:'bg-teal-100 text-teal-600',title:'Categoria de maior interesse',
+      text:'"'+topCats[0][0]+'" responde por '+topCats[0][1]+' interacoes. Concentre vitrines, destaques e ofertas nesta categoria.',
+      action:"switchAdminSection('products')",actionLabel:'Ver categoria'});
     if(topBrands.length)insights.push({icon:'fa-tag',color:'bg-emerald-100 text-emerald-600',title:'Marca de maior interesse',
-      text:topBrands[0][0]+' lidera em interesse ('+topBrands[0][1]+' eventos). Use-a em campanhas e negocie melhores condicoes com o fornecedor.'});
+      text:topBrands[0][0]+' lidera em interesse ('+topBrands[0][1]+' eventos). Use-a em campanhas e negocie melhores condicoes com o fornecedor.',
+      action:"switchAdminSection('promos')",actionLabel:'Criar promocao'});
+    if(curI>=20&&vEv.length>0){var funnelPct=Math.round((curW+cEv.length)/vEv.length*100);
+      insights.push({icon:'fa-filter',color:'bg-cyan-100 text-cyan-600',title:'Conversao do funil',
+        text:'De cada 100 produtos vistos, '+funnelPct+' viram consulta. '+(funnelPct<30?'Revise descricao, fotos e precos dos produtos mais vistos.':'Atencao: manter resposta rapida no WhatsApp e decisivo para fechar essas vendas.')});
+    }
     if(lowConv.length)insights.push({icon:'fa-eye-slash',color:'bg-red-100 text-red-600',title:'Produto visto e nao consultado',
-      text:'"'+(prodById[lowConv[0].id]?prodById[lowConv[0].id].name.slice(0,30):lowConv[0].id)+'" tem '+lowConv[0].views+' visualizacoes e 0 consultas. Revise descricao, fotos ou posicao.'});
+      text:'"'+(prodById[lowConv[0].id]?prodById[lowConv[0].id].name.slice(0,30):lowConv[0].id)+'" tem '+lowConv[0].views+' visualizacoes e 0 consultas. Revise descricao, fotos ou posicao.',
+      action:"startProductForm('"+lowConv[0].id+"')",actionLabel:'Revisar produto'});
     if(lowStock>0)insights.push({icon:'fa-exclamation-circle',color:'bg-red-100 text-red-600',title:'Estoque baixo',
-      text:lowStock+' produtos acabando, verifique reposicao na aba Produtos.'});
+      text:lowStock+' produtos acabando, verifique reposicao na aba Produtos.',
+      action:"switchAdminSection('products')",actionLabel:'Repor estoque'});
   } else {
-    insights.push({icon:'fa-info-circle',color:'bg-green-100 text-green-600',title:'Aguardando dados',
-      text:'Nenhuma interacao registrada no periodo. Navegue pelo site para coletar dados reais de interesse.'});
+    insights.push({icon:'fa-info-circle',color:'bg-green-100 text-green-600',title:'Aguardando dados reais',
+      text:'Nenhuma interacao registrada no periodo. Navegue pelo site publico (buscas, produtos, WhatsApp) para coletar dados reais de interesse.'});
   }
 
   var funnel=[
@@ -2179,10 +2178,13 @@ function renderDashboard(){
         '<div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">'+
           '<h3 class="font-bold text-gray-800 mb-4"><i class="fas fa-lightbulb text-amber-500 mr-2"></i>Insights &amp; Acoes sugeridas</h3>'+
           '<div class="space-y-3">'+
-            insights.slice(0,5).map(function(inp){return'<div class="flex gap-3 p-3 rounded-xl border border-gray-100 bg-gray-50/60">'+
+            insights.slice(0,6).map(function(inp){return'<div class="flex gap-3 p-3 rounded-xl border border-gray-100 bg-gray-50/60">'+
               '<div class="w-9 h-9 '+inp.color+' rounded-lg flex items-center justify-center flex-shrink-0"><i class="fas '+inp.icon+'"></i></div>'+
-              '<div><div class="text-sm font-semibold text-gray-800 mb-0.5">'+inp.title+'</div>'+
-              '<div class="text-xs text-gray-500 leading-relaxed">'+inp.text+'</div></div>'+
+              '<div class="min-w-0">'+
+                '<div class="text-sm font-semibold text-gray-800 mb-0.5">'+inp.title+'</div>'+
+                '<div class="text-xs text-gray-500 leading-relaxed">'+inp.text+'</div>'+
+                (inp.action?'<button onclick="'+inp.action+'" class="mt-2 inline-flex items-center gap-1.5 text-[11px] font-semibold bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg transition-colors"><i class="fas fa-arrow-right text-[10px]"></i>'+inp.actionLabel+'</button>':'')+
+              '</div>'+
             '</div>'}).join('')+
           '</div>'+
         '</div>'+
