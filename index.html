@@ -3465,22 +3465,24 @@ function uploadProductImage(src,folder){
     return Promise.resolve(src);
   }
   return new Promise(function(resolve){
+    var done=false;
+    function finish(v){ if(done)return; done=true; resolve(v); }
     try{
       var m=String(src).match(/^data:image\/([a-zA-Z0-9.+-]+)/);
       var ext=(m&&m[1])?m[1].replace(/[^a-z0-9]/gi,'')||'jpg':'jpg';
       var name=('img'+Date.now()+'-'+Math.random().toString(36).slice(2,7)+'.'+ext);
       var sr=firebase.storage().ref('img/produtos/'+folder+'/'+name);
-      sr.putString(src,'data_url').then(function(){
-        return sr.getDownloadURL();
-      }).then(function(url){
-        resolve(url);
-      }).catch(function(err){
-        console.error('FB storage upsert',err);
-        resolve(src);
-      });
+      Promise.resolve(sr.putString(src,'data_url'))
+        .then(function(){ return sr.getDownloadURL(); })
+        .then(function(url){ finish(url); })
+        .catch(function(err){
+          console.error('FB storage upload',err);
+          finish(src);
+        });
+      setTimeout(function(){ finish(src); }, 15000);
     }catch(err){
       console.error('FB storage upload',err);
-      resolve(src);
+      finish(src);
     }
   });
 }
@@ -3747,34 +3749,35 @@ function renderProductForm(id){
 }
 
 function saveProduct(e,id){
-  e.preventDefault();
-  const f=new FormData(e.target);
-  const products=DB.products();
-  var rawImages=f.get('images');
-  var images=[];
-  try{images=JSON.parse(rawImages)||[]}catch{images=[];}
-  if(!images.length&&rawImages){
-    images=rawImages.split('\n').map(function(t){return t.trim()}).filter(Boolean);
-  }
-  if(!images.length){images=['https://picsum.photos/seed/'+genId()+'/600/500'];}
-  var folder=id||('p'+genId());
-  uploadProductImages(images,folder).then(function(uploaded){
+  try{
+    e.preventDefault();
+    const f=new FormData(e.target);
+    const products=DB.products();
+    var rawImages=f.get('images');
+    var images=[];
+    try{images=JSON.parse(rawImages)||[]}catch{images=[];}
+    if(!images.length&&rawImages){
+      images=rawImages.split('\n').map(function(t){return t.trim()}).filter(Boolean);
+    }
+    if(!images.length){images=['https://picsum.photos/seed/'+genId()+'/600/500'];}
+    var folder=id||('p'+genId());
     var focalParts=(f.get('focalPoints')||'').split('|');
-    var focalPoints=uploaded.map(function(url,i){
+    var focalPoints=images.map(function(url,i){
       var part=(focalParts[i]||'').trim();
       if(!part) return null;
       var c=part.split(',');
       var x=parseFloat(c[0]),y=parseFloat(c[1]);
       return (isNaN(x)||isNaN(y))?null:{x:x,y:y};
     });
+    var tagsVal=f.get('tags');
     const data={
       name:f.get('name'),category:f.get('category'),sku:f.get('sku'),brand:f.get('brand')||null,
       species:f.get('species')||null,unitType:f.get('unitType')||'un',unitQty:parseFloat(f.get('unitQty'))||1,
       price:f.get('price')?parseFloat(f.get('price')):null,
       originalPrice:f.get('originalPrice')?parseFloat(f.get('originalPrice')):null,
       stock:f.get('stock')?parseInt(f.get('stock')):null,
-      tags:f.get('tags').split(',').map(function(t){return t.trim()}).filter(Boolean),
-      images:uploaded,
+      tags:tagsVal?tagsVal.split(',').map(function(t){return t.trim()}).filter(Boolean):[],
+      images:images,
       focalPoints:focalPoints,
       description:f.get('description'),techInfo:f.get('techInfo')||'',
       featured:f.get('featured')==='on',active:f.get('active')==='on',prescription:f.get('prescription')==='on',
@@ -3782,11 +3785,34 @@ function saveProduct(e,id){
     if(id){
       const idx=products.findIndex(function(x){return x.id===id});
       if(idx>=0) products[idx]=Object.assign({},products[idx],data);
+      showToast('Produto atualizado com sucesso!');
     } else {
       products.unshift(Object.assign({id:folder},data,{rating:0,reviews:0,createdAt:new Date().toISOString()}));
+      showToast('Produto criado com sucesso!');
     }
     DB.setProducts(products);
     switchAdminSection('products');
+    storeImagesAsync(folder,images);
+  }catch(err){
+    console.error('saveProduct',err);
+    showToast('Erro ao salvar o produto: '+(err&&err.message||'desconhecido'),'error');
+  }
+}
+
+function storeImagesAsync(folder,images){
+  if(!images||!images.some(function(i){return String(i).indexOf('data:')===0})) return;
+  uploadProductImages(images,folder).then(function(uploaded){
+    try{
+      const cur=DB.products();
+      const i=cur.findIndex(function(p){return p&&p.id===folder});
+      if(i<0) return;
+      const changed=uploaded.some(function(u,j){return u!==images[j]});
+      if(!changed) return;
+      cur[i].images=uploaded;
+      DB.setProducts(cur);
+    }catch(e){
+      console.error('saveProduct bg images',e);
+    }
   });
 }
 
