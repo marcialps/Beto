@@ -13,6 +13,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
 <script src="firebase-config.js"></script>
 <style>
   body{font-family:system-ui,-apple-system,sans-serif;background:#f0fdf4}
@@ -425,7 +426,7 @@ const DB = (function(){
   }
 
   async function loadAll(){
-    const jobs = COLL.map(async function(key){
+    const jobs = COLL.filter(function(k){return k!=='products'}).map(async function(key){
       try{
         const ref = docRef(key);
         if(!ref){ mem[key]=defaultFor(key); return; }
@@ -450,11 +451,13 @@ const DB = (function(){
         mem[key] = defaultFor(key);
       }
     });
+    jobs.push(loadProducts());
     await Promise.all(jobs);
   }
 
   function flushKey(key){
     timers[key]=null;
+    if(key==='products'){ return; }
     if(!(key in pending)) return;
     const val=pending[key];
     delete pending[key];
@@ -467,6 +470,87 @@ const DB = (function(){
     });
   }
 
+  const productsCol = function(){ return fire.db? fire.db.collection('agrovel_data').doc('products').collection('items') : null; };
+  const _productsBaseline = {};
+  let _productsDirty = false;
+
+  async function loadProducts(){
+    if(!fire.db){ mem['products']=defaultFor('products'); return; }
+    try{
+      const col = productsCol();
+      const snap = await col.get();
+      if(!snap.empty){
+        mem['products'] = snap.docs.map(function(d){return d.data()});
+        Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
+        mem['products'].forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
+        return;
+      }
+    }catch(e){ console.error('FB load products sub', e); }
+    try{
+      const ref = fire.db.collection('agrovel_data').doc('products');
+      const s = await ref.get();
+      const data = (s.exists && s.data()) ? s.data() : {};
+      if(Array.isArray(data.v) && data.v.length){
+        mem['products'] = data.v;
+        Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
+        data.v.forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
+        const col = productsCol();
+        const batch = fire.db.batch();
+        data.v.forEach(function(p){ if(p&&p.id) batch.set(col.doc(p.id), p); });
+        await batch.commit();
+        try{ await ref.delete(); }catch(e){ console.error('FB migrate legacy removed', e); }
+        return;
+      }
+    }catch(e){ console.error('FB load products legacy', e); }
+    mem['products'] = defaultFor('products');
+  }
+
+  async function flushProducts(){
+    timers['products']=null;
+    _productsDirty=false;
+    if(!fire.db) return;
+    try{
+      const col = productsCol();
+      const val = Array.isArray(mem['products']) ? mem['products'] : [];
+      const writes = [], deletes = [], seen = {};
+      val.forEach(function(p){
+        if(!p || !p.id) return;
+        seen[p.id]=1;
+        const s = JSON.stringify(p);
+        if(_productsBaseline[p.id]!==s) writes.push({id:p.id, data:p});
+      });
+      Object.keys(_productsBaseline).forEach(function(id){ if(!seen[id]) deletes.push(id); });
+      let i;
+      if(writes.length){
+        for(i=0;i<writes.length;i+=450){
+          const batch = fire.db.batch();
+          writes.slice(i,i+450).forEach(function(w){ batch.set(col.doc(w.id), w.data); });
+          await batch.commit();
+        }
+        writes.forEach(function(w){ _productsBaseline[w.id]=JSON.stringify(w.data); });
+      }
+      if(deletes.length){
+        for(i=0;i<deletes.length;i+=450){
+          const batch = fire.db.batch();
+          deletes.slice(i,i+450).forEach(function(id){ batch.delete(col.doc(id)); });
+          await batch.commit();
+        }
+        deletes.forEach(function(id){ delete _productsBaseline[id]; });
+      }
+    }catch(err){
+      console.error('FB write products', err);
+      _productsDirty = true;
+      setTimeout(function(){showToast('Erro ao salvar "products" no Firebase. Verifique sua conexao.','error')},10);
+    }
+  }
+
+  function markProductsDirty(){
+    if(!fire.db) return;
+    _productsDirty = true;
+    if(timers['products']) clearTimeout(timers['products']);
+    timers['products'] = setTimeout(function(){flushProducts()},500);
+  }
+
   function persist(key){
     if(!fire.db) return;
     pending[key]=mem[key];
@@ -476,6 +560,7 @@ const DB = (function(){
 
   function flushAll(){
     COLL.forEach(function(k){ if(k in pending) flushKey(k); });
+    if(_productsDirty) flushProducts();
   }
   try{ window.addEventListener('beforeunload', flushAll); }catch(e){}
 
@@ -490,7 +575,7 @@ const DB = (function(){
     s(key,val){ mem[key]=val; persist(key); return true; },
 
     products(){return this.g('products')||DEFAULT_PRODUCTS},
-    setProducts(v){ mem['products']=v; persist('products'); return true; },
+    setProducts(v){ mem['products']=v; markProductsDirty(); return true; },
     orders(){return this.g('orders')||DEFAULT_ORDERS},
     setOrders(v){ mem['orders']=v; persist('orders'); return true; },
     customers(){return this.g('customers')||DEFAULT_CUSTOMERS},
@@ -3375,6 +3460,35 @@ function compressImage(file, cb){
   reader.readAsDataURL(file);
 }
 
+function uploadProductImage(src,folder){
+  if(!window.firebase || !firebase.storage || String(src).indexOf('data:')!==0){
+    return Promise.resolve(src);
+  }
+  return new Promise(function(resolve){
+    try{
+      var m=String(src).match(/^data:image\/([a-zA-Z0-9.+-]+)/);
+      var ext=(m&&m[1])?m[1].replace(/[^a-z0-9]/gi,'')||'jpg':'jpg';
+      var name=('img'+Date.now()+'-'+Math.random().toString(36).slice(2,7)+'.'+ext);
+      var sr=firebase.storage().ref('img/produtos/'+folder+'/'+name);
+      sr.putString(src,'data_url').then(function(){
+        return sr.getDownloadURL();
+      }).then(function(url){
+        resolve(url);
+      }).catch(function(err){
+        console.error('FB storage upsert',err);
+        resolve(src);
+      });
+    }catch(err){
+      console.error('FB storage upload',err);
+      resolve(src);
+    }
+  });
+}
+
+function uploadProductImages(images,folder){
+  return Promise.all(images.map(function(src){return uploadProductImage(src,folder)}));
+}
+
 function handleImageSelect(input){
   Array.from(input.files||[]).forEach(function(f){
     if(f.type.indexOf('image/')!==0) return;
@@ -3643,36 +3757,37 @@ function saveProduct(e,id){
     images=rawImages.split('\n').map(function(t){return t.trim()}).filter(Boolean);
   }
   if(!images.length){images=['https://picsum.photos/seed/'+genId()+'/600/500'];}
-  var focalParts=(f.get('focalPoints')||'').split('|');
-  var focalPoints=images.map(function(url,i){
-    var part=(focalParts[i]||'').trim();
-    if(!part) return null;
-    var c=part.split(',');
-    var x=parseFloat(c[0]),y=parseFloat(c[1]);
-    return (isNaN(x)||isNaN(y))?null:{x:x,y:y};
+  var folder=id||('p'+genId());
+  uploadProductImages(images,folder).then(function(uploaded){
+    var focalParts=(f.get('focalPoints')||'').split('|');
+    var focalPoints=uploaded.map(function(url,i){
+      var part=(focalParts[i]||'').trim();
+      if(!part) return null;
+      var c=part.split(',');
+      var x=parseFloat(c[0]),y=parseFloat(c[1]);
+      return (isNaN(x)||isNaN(y))?null:{x:x,y:y};
+    });
+    const data={
+      name:f.get('name'),category:f.get('category'),sku:f.get('sku'),brand:f.get('brand')||null,
+      species:f.get('species')||null,unitType:f.get('unitType')||'un',unitQty:parseFloat(f.get('unitQty'))||1,
+      price:f.get('price')?parseFloat(f.get('price')):null,
+      originalPrice:f.get('originalPrice')?parseFloat(f.get('originalPrice')):null,
+      stock:f.get('stock')?parseInt(f.get('stock')):null,
+      tags:f.get('tags').split(',').map(function(t){return t.trim()}).filter(Boolean),
+      images:uploaded,
+      focalPoints:focalPoints,
+      description:f.get('description'),techInfo:f.get('techInfo')||'',
+      featured:f.get('featured')==='on',active:f.get('active')==='on',prescription:f.get('prescription')==='on',
+    };
+    if(id){
+      const idx=products.findIndex(function(x){return x.id===id});
+      if(idx>=0) products[idx]=Object.assign({},products[idx],data);
+    } else {
+      products.unshift(Object.assign({id:folder},data,{rating:0,reviews:0,createdAt:new Date().toISOString()}));
+    }
+    DB.setProducts(products);
+    switchAdminSection('products');
   });
-  const data={
-    name:f.get('name'),category:f.get('category'),sku:f.get('sku'),brand:f.get('brand')||null,
-    species:f.get('species')||null,unitType:f.get('unitType')||'un',unitQty:parseFloat(f.get('unitQty'))||1,
-    price:f.get('price')?parseFloat(f.get('price')):null,
-    originalPrice:f.get('originalPrice')?parseFloat(f.get('originalPrice')):null,
-    stock:f.get('stock')?parseInt(f.get('stock')):null,
-    tags:f.get('tags').split(',').map(function(t){return t.trim()}).filter(Boolean),
-    images:images,
-    focalPoints:focalPoints,
-    description:f.get('description'),techInfo:f.get('techInfo')||'',
-    featured:f.get('featured')==='on',active:f.get('active')==='on',prescription:f.get('prescription')==='on',
-  };
-  if(id){
-    const idx=products.findIndex(function(x){return x.id===id});
-    if(idx>=0) products[idx]=Object.assign({},products[idx],data);
-    showToast('Produto atualizado com sucesso!');
-  } else {
-    products.unshift(Object.assign({id:'p'+genId()},data,{rating:0,reviews:0,createdAt:new Date().toISOString()}));
-    showToast('Produto criado com sucesso!');
-  }
-  var ok=DB.setProducts(products);
-  if(ok) switchAdminSection('products');
 }
 
 // ============================================================
