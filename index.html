@@ -19,6 +19,9 @@
   body{font-family:system-ui,-apple-system,sans-serif;background:#f0fdf4}
   .fade-in{animation:fadeIn .25s ease forwards}
   @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .promo-card{animation:promoPop .5s cubic-bezier(.16,1,.3,1) both}
+  @keyframes promoPop{from{opacity:0;transform:scale(.92) translateY(16px)}to{opacity:1;transform:none}}
+  @keyframes promoFade{from{opacity:0}to{opacity:1}}
   #toast{position:fixed;bottom:24px;right:24px;z-index:9999;transition:all .3s;pointer-events:none}
   .line-clamp-2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .line-clamp-3{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
@@ -2952,6 +2955,20 @@ function ytThumbCard(v){
     '<div class="absolute bottom-2 left-0 right-0 text-center text-xs font-semibold text-white" style="text-shadow:0 1px 3px rgba(0,0,0,.8)">Assistir no YouTube</div>'+
   '</a>';
 }
+function fbVideoUrl(v){
+  var u=String(v||'').replace(/^https?:\/\//,'');
+  if(!u||!/^(www\.|m\.|web\.|business\.)?(facebook\.com|fb\.watch)\//.test(u))return null;
+  var full=(String(v).indexOf('http')===0)?String(v):'https://'+u;
+  return 'https://www.facebook.com/plugins/video.php?href='+encodeURIComponent(full)+'&autoplay=1&mute=1&loop=1&show_text=false&allowfullscreen=true&allowTransparency=true';
+}
+function fbThumbCard(v){
+  if(!fbVideoUrl(v))return'';
+  return '<a href="'+String(v)+'" target="_blank" rel="noopener" class="relative w-full h-full block overflow-hidden" title="Abrir v\u00eddeo no Facebook">'+
+    '<div class="absolute inset-0" style="background:linear-gradient(135deg,#1877F2 0%,#0C5BC6 55%,#083E91 100%)"></div>'+
+    '<div class="absolute inset-0 flex items-center justify-center" style="background:rgba(0,0,0,.15)"><div class="w-14 h-14 rounded-full bg-white flex items-center justify-center shadow-lg"><i class="fab fa-facebook-f text-xl" style="color:#1877F2"></i></div></div>'+
+    '<div class="absolute bottom-2 left-0 right-0 text-center text-xs font-semibold text-white" style="text-shadow:0 1px 3px rgba(0,0,0,.8)">Ver v\u00eddeo no Facebook</div>'+
+  '</a>';
+}
 var _ytApiInjected=false;
 function ensureYouTubeApi(cb){
   if(window.YT&&window.YT.Player){cb();return}
@@ -3013,6 +3030,7 @@ function mediaEl(p){
   if(p&&p.video){
     var vr=String(p.video);
     if(ytEmbedId(vr))return'<div class="aspect-video rounded-xl overflow-hidden bg-black">'+ytThumbCard(vr)+'</div>';
+    if(fbVideoUrl(vr))return'<div class="aspect-video rounded-xl overflow-hidden">'+fbThumbCard(vr)+'</div>';
     if(vr.indexOf('idb:')===0)return'<div class="aspect-video rounded-xl overflow-hidden bg-black"><video data-idb="'+vr+'" controls muted class="'+cls+'" poster="'+poster+'"></video></div>';
     return'<div class="aspect-video rounded-xl overflow-hidden bg-black"><video src="'+vr+'" controls muted class="'+cls+'" poster="'+poster+'"></video></div>';
   }
@@ -3046,7 +3064,7 @@ function renderAdminPromos(){
         '<div><label class="text-sm text-gray-600 mb-1 block">Mensagem</label>'+
           '<textarea id="promo-text" rows="2" placeholder="Texto de apoio..." class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none resize-none"></textarea></div>'+
         '<div><label class="text-sm text-gray-600 mb-1 block">V\u00eddeo (YouTube, URL ou upload)</label>'+
-          '<input id="promo-video" type="text" placeholder="https://www.youtube.com/watch?v=... ou https://.../video.mp4" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none mb-2">'+
+          '<input id="promo-video" type="text" placeholder="YouTube, Facebook (https://www.facebook.com/watch/?v=...) ou https://.../video.mp4" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none mb-2">'+
           '<input type="file" id="promo-video-file" accept="video/*" class="hidden" onchange="handlePromoVideoFile(this)">'+
           '<button type="button" onclick="document.getElementById(\'promo-video-file\').click()" class="w-full text-sm bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl border border-green-200 transition-colors"><i class="fas fa-cloud-upload-alt mr-1.5"></i>Enviar video do dispositivo</button></div>'+
         '<div><label class="text-sm text-gray-600 mb-1 block">Imagem (URL ou upload)</label>'+
@@ -3270,6 +3288,23 @@ function deletePromo(id){
   renderAdminSection();
 }
 
+function promoBadgeHtml(){
+  return '<div style="display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,0.16);backdrop-filter:blur(10px);color:#fff;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:7px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.28);box-shadow:0 4px 14px rgba(0,0,0,0.18)"><i class="fas fa-bullhorn" style="color:#fde047;font-size:12px"></i> Promo\u00e7\u00e3o Ativa</div>';
+}
+function promoCloseBtnHtml(){
+  return '<button onclick="closePromoPopup()" aria-label="Fechar" style="position:absolute;top:14px;right:14px;z-index:20;width:40px;height:40px;border-radius:50%;background:rgba(10,10,10,0.35);backdrop-filter:blur(8px);color:#fff;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:15px;border:1px solid rgba(255,255,255,0.25);box-shadow:0 4px 14px rgba(0,0,0,0.25);transition:all .2s"><i class="fas fa-times"></i></button>';
+}
+function promoOverlayHtml(p){
+  if(!p.title&&!p.text) return '';
+  var h='<div style="position:absolute;left:0;right:0;bottom:0;z-index:10;padding:56px 20px 20px;background:linear-gradient(180deg,rgba(0,0,0,0) 0%,rgba(0,0,0,0.42) 42%,rgba(0,0,0,0.88) 100%);color:#fff;text-align:left">';
+  if(p.title) h+='<h2 style="margin:0;font-size:24px;font-weight:800;line-height:1.12;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,0.5)">'+p.title+'</h2>';
+  if(p.text) h+='<p style="margin:8px 0 0;font-size:14px;line-height:1.5;color:rgba(255,255,255,0.94);text-shadow:0 1px 8px rgba(0,0,0,0.5);max-width:460px">'+p.text+'</p>';
+  h+='<div style="margin-top:14px;display:flex;gap:10px">'+
+    '<button onclick="closePromoPopup()" style="flex:1;background:#fff;color:#065f46;font-weight:800;font-size:15px;padding:12px;border-radius:14px;cursor:pointer;border:none;box-shadow:0 8px 24px rgba(0,0,0,0.28)"><i class="fas fa-check-circle" style="margin-right:6px"></i>Fechar promo\u00e7\u00e3o</button>'+
+    '</div>';
+  h+='</div>';
+  return h;
+}
 function showPromoPopup(){
   var promos=DB.promos();
   var active=promos.find(function(x){return x.active});
@@ -3277,39 +3312,57 @@ function showPromoPopup(){
   trackEvent('promo_view',{title:active.title});
   var existing=document.getElementById('promo-popup');
   if(existing)existing.remove();
-  var mediaHtml='';
   var pimg=active.image;
   var pvid=active.video;
+  var hasMedia=!!(pvid||pimg);
+  var mediaHtml='';
+
   if(pvid){
     var pv=String(pvid);
+    var imgPoster=(pimg&&String(pimg).indexOf('idb:')!==0)?String(pimg):'';
     if(ytEmbedId(pv)){
       mediaHtml='<div id="promo-youtube" style="aspect-ratio:16/9;background:#000;position:relative"></div>';
+    } else if(fbVideoUrl(pv)){
+      mediaHtml='<div style="aspect-ratio:16/9;background:#000;position:relative"><iframe src="'+fbVideoUrl(pv)+'" title="V\u00eddeo do Facebook" style="position:absolute;inset:0;width:100%;height:100%;border:none;overflow:hidden" scrolling="no" frameborder="0" allowtransparency="true" allowfullscreen="true" allow="autoplay; fullscreen; picture-in-picture; encrypted-media"></iframe></div>';
     } else if(pv.indexOf('idb:')===0){
-      mediaHtml='<div style="aspect-ratio:16/9;background:#000"><video data-idb="'+pv+'" autoplay loop muted playsinline controls style="width:100%;height:100%;object-fit:contain"></video></div>';
+      mediaHtml='<video data-idb="'+pv+'" autoplay loop muted playsinline controls poster="'+imgPoster+'" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:contain;display:block;background:#000"></video>';
     } else {
-      mediaHtml='<div style="aspect-ratio:16/9;background:#000"><video src="'+pv+'" autoplay loop muted playsinline controls style="width:100%;height:100%;object-fit:contain"></video></div>';
+      mediaHtml='<video src="'+pv+'" autoplay loop muted playsinline controls poster="'+imgPoster+'" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:contain;display:block;background:#000"></video>';
     }
-  } else if(pimg&&String(pimg).indexOf('idb:')===0){
-    mediaHtml='<div style="width:100%;max-height:340px;overflow:hidden;background:#eee"><img data-idb="'+pimg+'" style="width:100%;height:100%;object-fit:cover" alt="'+active.title+'"></div>';
   } else if(pimg){
-    mediaHtml='<div style="width:100%;max-height:340px;overflow:hidden;background:#eee"><img src="'+pimg+'" style="width:100%;height:100%;object-fit:cover" alt="'+active.title+'"></div>';
+    var ir=String(pimg);
+    if(ir.indexOf('idb:')===0) mediaHtml='<img data-idb="'+ir+'" alt="" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:cover;display:block">';
+    else mediaHtml='<img src="'+ir+'" alt="" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:cover;display:block">';
   }
+
+  var cardBody='';
+  if(hasMedia){
+    cardBody='<div style="position:relative">'+
+      '<div style="position:absolute;top:14px;left:14px;z-index:15">'+promoBadgeHtml()+'</div>'+
+      promoCloseBtnHtml()+
+      mediaHtml+
+      promoOverlayHtml(active)+
+    '</div>';
+  } else {
+    cardBody='<div style="position:relative;overflow:hidden;background:linear-gradient(160deg,#03301f 0%,#065f46 55%,#059669 100%);padding:48px 26px 28px;color:#fff;text-align:left">'+
+      '<span style="position:absolute;top:-60px;right:-60px;width:230px;height:230px;border-radius:50%;background:rgba(253,224,71,0.18);filter:blur(6px)"></span>'+
+      '<span style="position:absolute;bottom:-80px;left:-40px;width:210px;height:210px;border-radius:50%;background:rgba(255,255,255,0.14);filter:blur(6px)"></span>'+
+      promoCloseBtnHtml()+
+      '<div style="position:relative;z-index:2">'+promoBadgeHtml()+
+        '<h2 style="margin:18px 0 8px;font-size:28px;font-weight:800;line-height:1.12;text-shadow:0 2px 12px rgba(0,0,0,0.3)">'+active.title+'</h2>'+
+        (active.text?'<p style="margin:0 0 22px;font-size:15px;line-height:1.6;color:rgba(255,255,255,0.92)">'+active.text+'</p>':'<div style="height:10px"></div>')+
+        '<button onclick="closePromoPopup()" style="width:100%;background:#fff;color:#065f46;font-weight:800;font-size:15px;padding:14px;border-radius:14px;cursor:pointer;border:none;box-shadow:0 10px 30px rgba(0,0,0,0.3)"><i class="fas fa-check-circle" style="margin-right:6px"></i>Entendi, voltar \u00e0 loja</button>'+
+      '</div>'+
+    '</div>';
+  }
+
   var dv=document.createElement('div');
   dv.id='promo-popup';
   dv.style.cssText='position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
   dv.innerHTML=
-    '<div style="position:absolute;inset:0;background:rgba(6,50,28,0.7);backdrop-filter:blur(4px);z-index:10001" onclick="closePromoPopup()"></div>'+
-    '<div style="position:relative;z-index:10002;background:#ffffff;border-radius:24px;max-width:680px;width:100%;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,0.45)">'+
-      '<button onclick="closePromoPopup()" style="position:absolute;top:14px;right:14px;z-index:10;width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,0.92);color:#14532d;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;box-shadow:0 2px 10px rgba(0,0,0,0.2)"><i class="fas fa-times"></i></button>'+
-      mediaHtml+
-      '<div style="padding:26px 28px">'+
-        '<div style="display:inline-flex;align-items:center;gap:6px;background:#fef3c7;color:#92400e;font-size:12px;font-weight:700;padding:5px 12px;border-radius:999px;margin-bottom:12px"><i class="fas fa-bullhorn"></i> Promo\u00e7\u00e3o Ativa</div>'+
-        '<h2 style="margin:0 0 8px;font-size:26px;font-weight:800;color:#065f46">'+active.title+'</h2>'+
-        (active.text?'<p style="margin:0 0 20px;color:#4b5563;font-size:15px;line-height:1.5">'+active.text+'</p>':'<p style="margin:0 0 20px"></p>')+
-        '<div style="display:flex;gap:10px">'+
-          '<button onclick="closePromoPopup()" style="flex:1;background:#059669;color:#fff;font-weight:700;padding:13px;border-radius:12px;cursor:pointer;border:none">Fechar</button>'+
-        '</div>'+
-      '</div>'+
+    '<div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 35%,rgba(5,60,44,0.6),rgba(1,12,8,0.88));backdrop-filter:blur(10px);animation:promoFade .4s ease both;z-index:10001" onclick="closePromoPopup()"></div>'+
+    '<div class="promo-card" style="position:relative;z-index:10002;max-width:560px;width:100%;max-height:calc(100vh - 40px);overflow:auto;border-radius:26px;box-shadow:0 40px 90px rgba(0,0,0,0.55);background:#000;overflow:hidden">'+
+      cardBody+
     '</div>';
   document.body.appendChild(dv);
   resolveIdbMedia(dv);
