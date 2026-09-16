@@ -72,6 +72,29 @@
   .img-cover-hover{width:100%;height:100%;object-fit:cover;display:block;transition:transform .5s ease}
   .group:hover .img-cover-hover{transform:scale(1.05)}
   .admin-mobile-overlay{display:none}
+  .news-body{line-height:1.7;color:#374151;word-wrap:break-word}
+  .news-body h1{font-size:1.5rem;font-weight:800;color:#111827;margin:1.5rem 0 .75rem;line-height:1.25}
+  .news-body h2{font-size:1.25rem;font-weight:700;color:#111827;margin:1.25rem 0 .6rem;line-height:1.3}
+  .news-body h3{font-size:1.1rem;font-weight:700;color:#111827;margin:1rem 0 .5rem;line-height:1.35}
+  .news-body p{margin:0 0 .9rem}
+  .news-body ul{list-style:disc;padding-left:1.5rem;margin:0 0 .9rem}
+  .news-body ol{list-style:decimal;padding-left:1.5rem;margin:0 0 .9rem}
+  .news-body li{margin-bottom:.3rem}
+  .news-body a{color:#15803d;text-decoration:underline}
+  .news-body a:hover{color:#166534}
+  .news-body blockquote{border-left:4px solid #86efac;background:#f0fdf4;padding:.6rem 1rem;border-radius:.5rem;margin:0 0 .9rem;color:#166534;font-style:italic}
+  .news-body img{max-width:100%;height:auto;border-radius:.75rem;margin:.5rem 0;display:block}
+  .news-body figure{margin:.75rem 0}
+  .news-body iframe{width:100%;aspect-ratio:16/9;border:none;border-radius:.75rem;margin:.75rem 0;display:block}
+  .news-body hr{border:none;border-top:2px dashed #bbf7d0;margin:1.25rem 0}
+  .news-tb{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:6px 8px;background:#f9fafb;border-bottom:1px solid #e5e7eb}
+  .news-tb-sep{width:1px;height:22px;background:#e5e7eb;margin:0 4px}
+  .news-btn{width:30px;height:30px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;color:#374151;background:transparent;border:none;cursor:pointer;transition:all .15s;font-size:12px;line-height:1;padding:0}
+  .news-btn:hover{background:#d1fae5;color:#15803d}
+  .news-btn.active{background:#bbf7d0;color:#15803d}
+  #news-editor{min-height:240px}
+  #news-editor[contenteditable=true]:focus{outline:none;box-shadow:inset 0 0 0 2px #86efac}
+  #news-editor:empty:before{content:attr(data-placeholder);color:#9ca3af;font-size:13px;pointer-events:none}
   @media(min-width:769px){
     .admin-sidebar{position:relative!important;transform:none!important;width:16rem!important;display:flex!important}
   }
@@ -1788,9 +1811,26 @@ function inlineFmt(s){
     .replace(/\*(.+?)\*/g,'<em>$1</em>')
     .replace(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g,'<a href="$2" target="_blank" rel="noopener" class="text-green-600 underline">$1</a>');
 }
+function sanitizeHtml(h){
+  var t=document.createElement('template');
+  t.innerHTML=String(h==null?'':h);
+  var content=t.content;
+  content.querySelectorAll('script,style,object,embed').forEach(function(n){n.remove()});
+  content.querySelectorAll('*').forEach(function(n){
+    Array.prototype.slice.call(n.attributes).forEach(function(a){
+      var name=a.name.toLowerCase();
+      var v=(a.value||'').trim();
+      if(name.indexOf('on')===0||name==='style') n.removeAttribute(a.name);
+      else if((name==='href'||name==='src')&&/^\s*javascript:/i.test(v)) n.removeAttribute(a.name);
+    });
+  });
+  return t.innerHTML;
+}
 function newsToHtml(txt){
   if(!txt) return '<p class="text-gray-700 leading-relaxed mb-3">Publicação sem conteúdo.</p>';
-  var lines=String(txt).split('\n');
+  txt=String(txt);
+  if(/<[a-zA-Z!\/][^>]*>/.test(txt)) return sanitizeHtml(txt);
+  var lines=txt.split('\n');
   var html='',list=false;
   function closeList(){if(list){html+='</ul>';list=false;}}
   lines.forEach(function(line){
@@ -2016,7 +2056,7 @@ function renderBlogPost(id){
             '<a href="'+shareUrl+'" target="_blank" rel="noopener" title="Compartilhar no WhatsApp" class="bg-green-100 text-green-700 hover:bg-green-600 hover:text-white w-9 h-9 rounded-full flex items-center justify-center transition-colors"><i class="fab fa-whatsapp"></i></a>'+
           '</div>'+
         '</div>'+
-        '<div>'+newsToHtml(n.content)+'</div>'+
+        '<div class="news-body">'+newsToHtml(n.content)+'</div>'+
         (n.tags&&n.tags.length?'<div class="flex flex-wrap gap-2 mt-6 pt-6 border-t border-green-100">'+n.tags.map(function(t){return '<span class="text-xs bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full">#'+esc(t)+'</span>'}).join('')+'</div>':'')+
       '</div>'+
     '</div>'+
@@ -3349,9 +3389,14 @@ function updateMediaPreview(){
 
 function updateNewsPreview(){
   var ta=document.getElementById('news-content');
+  var ed=document.getElementById('news-editor');
   var pv=document.getElementById('news-preview');
-  if(!ta||!pv) return;
-  pv.innerHTML=newsToHtml(ta.value)||'<span class="text-gray-400">Pre-visualizacao vazia.</span>';
+  if(!pv) return;
+  var html='';
+  if(ed&&!_newsHtmlMode&&ed.innerHTML) html=ed.innerHTML;
+  else if(ta&&ta.value) html=ta.value;
+  pv.innerHTML='<div class="news-body">'+(html?newsToHtml(html):'<span class="text-gray-400">Pr\u00e9-visualiza\u00e7\u00e3o vazia.</span>')+'</div>';
+  resolveIdbMedia(pv);
 }
 
 function renderAdminNews(){
@@ -3423,11 +3468,20 @@ function renderNewsForm(id){
           '<div><label class="text-sm text-gray-600 mb-1 block">Resumo (aparece nos cards do blog)</label>'+
             '<textarea name="excerpt" rows="3" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none resize-none" placeholder="Resumo curto da publica\u00e7\u00e3o...">'+esc(v('excerpt'))+'</textarea></div>'+
           '<div><label class="text-sm text-gray-600 mb-1 block">Conte\u00fado da Not\u00edcia *</label>'+
-            '<div class="mb-2 text-xs text-gray-400 bg-green-50 border border-green-100 rounded-xl px-3 py-2 leading-relaxed">Formata\u00e7\u00e3o r\u00e1pida: use <code># T\u00edtulo</code> e <code>## Subt\u00edtulo</code> para t\u00edtulos, linhas com <code>- item</code> viram listas, <code>**negrito**</code> e links <code>[texto](url)</code>.</div>'+
-            '<textarea name="content" id="news-content" required rows="10" oninput="updateNewsPreview()" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none resize-y font-mono text-sm" placeholder="Escreva aqui o conte\u00fado da not\u00edcia...">'+esc(v('content'))+'</textarea></div>'+
+            '<div class="mb-2 text-xs text-gray-400 bg-green-50 border border-green-100 rounded-xl px-3 py-2 leading-relaxed">Editor visual: use a barra de ferramentas para formatar o texto, inserir links, imagens e v\u00eddeos do YouTube. Conte\u00fados antigos em marca\u00e7\u00e3o (markdown) continuam compat\u00edveis.</div>'+
+            '<div class="border border-gray-200 rounded-xl overflow-hidden bg-white">'+
+              newsToolbarHTML()+
+              '<div id="news-editor" contenteditable="true" class="news-body px-4 py-3 text-sm outline-none" data-placeholder="Escreva aqui o conte\u00fado da not\u00edcia..." oninput="newsEditorSync();updateNewsPreview()" onkeyup="updateNewsToolbar()" onmouseup="updateNewsToolbar()" spellcheck="false"></div>'+
+              '<textarea name="content" id="news-content" rows="12" hidden oninput="updateNewsPreview()" class="w-full px-4 py-3 font-mono text-sm resize-y outline-none border-t border-gray-200" placeholder="C\u00f3digo HTML / markdown do conte\u00fado...">'+esc(v('content'))+'</textarea>'+
+              '<input type="file" id="news-editor-img" accept="image/*" class="hidden" onchange="handleNewsEditorImage(this)">'+
+              '<div class="flex items-center justify-between gap-2 px-3 py-1.5 bg-gray-50 border-t border-gray-100 text-xs text-gray-400">'+
+                '<span id="news-editor-status"></span>'+
+                '<span id="news-editor-hint">Editor visual</span>'+
+              '</div>'+
+            '</div></div>'+
           '<div>'+
             '<label class="text-sm text-gray-600 mb-1 block font-medium">Pr\u00e9-visualiza\u00e7\u00e3o</label>'+
-            '<div id="news-preview" class="border border-gray-200 rounded-xl p-4 bg-gray-50 text-sm overflow-auto max-h-80">'+newsToHtml(v('content'))+'</div>'+
+            '<div id="news-preview" class="border border-gray-200 rounded-xl p-4 bg-gray-50 text-sm overflow-auto max-h-80"><div class="news-body">'+newsToHtml(v('content'))+'</div></div>'+
           '</div>'+
         '</div>'+
       '</div>'+
@@ -3467,14 +3521,15 @@ function initNewsForm(id){
   if(cu) cu.value=(n&&n.cover&&String(n.cover).indexOf('data:')!==0&&String(n.cover).indexOf('idb:')!==0)?n.cover:'';
   var nv=document.getElementById('news-video');
   if(nv) nv.value=(n&&n.video&&String(n.video).indexOf('data:')!==0&&String(n.video).indexOf('idb:')!==0)?n.video:'';
+  newsEditorSetup(n&&n.content?n.content:'');
   updateMediaPreview();
-  updateNewsPreview();
 }
 
 function startNewsForm(id){State.adminSection='news-form';State.editNewsId=id;renderAdminSection();}
 
 function saveNews(e,id){
   e.preventDefault();
+  if(!_newsHtmlMode) newsEditorSync();
   var f=new FormData(e.target);
   var title=f.get('title').trim();
   if(!title){showToast('Informe o t\u00edtulo da not\u00edcia','warn');return}
@@ -3525,6 +3580,166 @@ function deleteNews(id){
   if(State.editNewsId===id){State.editNewsId=null;_newsCover=null;_newsVideo=null;}
   showToast('Not\u00edcia exclu\u00edda','warn');
   renderAdminSection();
+}
+
+// ============================================================
+// NEWS RICH EDITOR (Conte\u00fado da Not\u00edcia)
+// ============================================================
+var _newsHtmlMode=false;
+
+function newsTbBtn(label,title,onclick,extra){
+  return '<button type="button" title="'+title+'" class="news-btn'+(extra?' '+extra:'')+'" onmousedown="event.preventDefault()" onclick="'+onclick+'">'+label+'</button>';
+}
+function newsToolbarHTML(){
+  var s='<span class="news-tb-sep"></span>';
+  return '<div class="news-tb">'+
+    newsTbBtn('<i class="fas fa-undo"></i>','Desfazer','newsEditorExec(\'undo\')')+
+    newsTbBtn('<i class="fas fa-redo"></i>','Refazer','newsEditorExec(\'redo\')')+s+
+    newsTbBtn('<i class="fas fa-bold"></i>','Negrito','newsEditorExec(\'bold\')','tb-b')+
+    newsTbBtn('<i class="fas fa-italic"></i>','It\u00e1lico','newsEditorExec(\'italic\')','tb-i')+
+    newsTbBtn('<i class="fas fa-underline"></i>','Sublinhado','newsEditorExec(\'underline\')','tb-u')+
+    newsTbBtn('<i class="fas fa-strikethrough"></i>','Riscado','newsEditorExec(\'strikeThrough\')','tb-s')+s+
+    newsTbBtn('<b>H1</b>','T\u00edtulo grande','newsEditorBlock(\'h1\')')+
+    newsTbBtn('<b>H2</b>','Subt\u00edtulo','newsEditorBlock(\'h2\')')+
+    newsTbBtn('<b>H3</b>','Se\u00e7\u00e3o','newsEditorBlock(\'h3\')')+
+    newsTbBtn('<b>P</b>','Par\u00e1grafo','newsEditorBlock(\'p\')')+s+
+    newsTbBtn('<i class="fas fa-list-ul"></i>','Lista de marcadores','newsEditorExec(\'insertUnorderedList\')')+
+    newsTbBtn('<i class="fas fa-list-ol"></i>','Lista numerada','newsEditorExec(\'insertOrderedList\')')+
+    newsTbBtn('<i class="fas fa-quote-left"></i>','Cita\u00e7\u00e3o','newsEditorBlock(\'blockquote\')')+s+
+    newsTbBtn('<i class="fas fa-link"></i>','Inserir link','newsEditorLink()')+
+    newsTbBtn('<i class="fas fa-cloud-upload-alt"></i>','Enviar imagem do dispositivo','document.getElementById(\'news-editor-img\').click()')+
+    newsTbBtn('<i class="fas fa-globe"></i>','Inserir imagem por URL','newsEditorInsertImageUrl()')+
+    newsTbBtn('<i class="fab fa-youtube"></i>','Inserir v\u00eddeo do YouTube','newsEditorInsertYoutube()')+s+
+    newsTbBtn('<i class="fas fa-align-left"></i>','Alinhar \u00e0 esquerda','newsEditorExec(\'justifyLeft\')')+
+    newsTbBtn('<i class="fas fa-align-center"></i>','Centralizar','newsEditorExec(\'justifyCenter\')')+
+    newsTbBtn('<i class="fas fa-align-right"></i>','Alinhar \u00e0 direita','newsEditorExec(\'justifyRight\')')+s+
+    newsTbBtn('<i class="fas fa-minus"></i>','Linha divis\u00f3ria','newsEditorExec(\'insertHorizontalRule\')')+s+
+    '<button type="button" id="news-source-toggle" title="C\u00f3digo HTML" class="news-btn" onmousedown="event.preventDefault()" onclick="toggleNewsEditorMode()"><i class="fas fa-code"></i></button>'+
+    '</div>';
+}
+
+function newsEditorExec(cmd,val){
+  var ed=document.getElementById('news-editor');
+  if(!ed) return;
+  ed.focus();
+  try{document.execCommand('styleWithCSS',false,false)}catch(e){}
+  try{document.execCommand(cmd,false,val||null)}catch(e){}
+  newsEditorSync();
+  updateNewsPreview();
+  updateNewsToolbar();
+}
+function newsEditorBlock(tag){
+  var ed=document.getElementById('news-editor');
+  if(!ed) return;
+  ed.focus();
+  var ok=false;
+  try{ok=document.execCommand('formatBlock',false,'<'+tag+'>')}catch(e){}
+  if(!ok){try{ok=document.execCommand('formatBlock',false,tag)}catch(e2){}}
+  newsEditorSync();
+  updateNewsPreview();
+  updateNewsToolbar();
+}
+function newsEditorLink(){
+  var u=prompt('URL do link (https://...):','https://');
+  if(u===null) return;
+  if(!String(u).trim()){showToast('Informe uma URL v\u00e1lida','warn');return}
+  newsEditorExec('createLink',String(u).trim());
+}
+function newsEditorInsertImageUrl(){
+  var u=prompt('URL da imagem (https://...):\nDica: use imagens de hospedagem est\u00e1vel (URL p\u00fablica).');
+  if(!u||!String(u).trim()) return;
+  newsEditorExec('insertImage',String(u).trim());
+}
+function handleNewsEditorImage(input){
+  var f=input.files&&input.files[0];
+  input.value='';
+  if(!f) return;
+  if(f.type.indexOf('image/')!==0){showToast('Somente arquivos de imagem','warn');return}
+  showToast('Enviando imagem, aguarde...');
+  compressImage(f,function(dataUrl){
+    uploadProductImage(dataUrl,'noticias').then(function(url){
+      newsEditorExec('insertImage',url);
+      showToast('Imagem inserida no conte\u00fado');
+    });
+  });
+}
+function newsEditorInsertYoutube(){
+  var u=prompt('URL do v\u00eddeo do YouTube:\nEx: https://www.youtube.com/watch?v=...');
+  if(!u||!String(u).trim()) return;
+  var id=ytEmbedId(u);
+  if(!id){showToast('URL de v\u00eddeo inv\u00e1lida','warn');return}
+  var html='<p><iframe src="https://www.youtube.com/embed/'+id+'" title="V\u00eddeo do YouTube" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe></p>';
+  var ed=document.getElementById('news-editor');
+  if(!ed) return;
+  ed.focus();
+  try{document.execCommand('styleWithCSS',false,false)}catch(e){}
+  try{document.execCommand('insertHTML',false,html)}catch(e){}
+  newsEditorSync();
+  updateNewsPreview();
+  updateNewsToolbar();
+}
+function newsEditorSync(){
+  var ed=document.getElementById('news-editor');
+  var ta=document.getElementById('news-content');
+  if(!ed||!ta) return;
+  ta.value=ed.innerHTML;
+  var st=document.getElementById('news-editor-status');
+  if(st){
+    var words=(ed.innerText||'').replace(/\s+/g,' ').trim().split(' ').filter(Boolean).length;
+    st.textContent=words+' palavra'+(words===1?'':'s');
+  }
+}
+function updateNewsToolbar(){
+  var ed=document.getElementById('news-editor');
+  if(!ed||!ed.isContentEditable) return;
+  var map={bold:'tb-b',italic:'tb-i',underline:'tb-u',strikeThrough:'tb-s'};
+  Object.keys(map).forEach(function(cmd){
+    var btn=document.querySelector('.news-btn.'+map[cmd]);
+    if(!btn) return;
+    try{ if(document.queryCommandState(cmd)) btn.classList.add('active'); else btn.classList.remove('active'); }catch(e){}
+  });
+}
+function newsEditorSetup(content){
+  var ed=document.getElementById('news-editor');
+  var ta=document.getElementById('news-content');
+  if(!ed||!ta) return;
+  ed.innerHTML=content?newsToHtml(content):'';
+  ta.value=ed.innerHTML;
+  _newsHtmlMode=false;
+  ed.hidden=false;
+  ta.hidden=true;
+  var hint=document.getElementById('news-editor-hint');
+  if(hint) hint.textContent='Editor visual';
+  var bt=document.getElementById('news-source-toggle');
+  if(bt) bt.innerHTML='<i class="fas fa-code"></i>';
+  updateNewsToolbar();
+  newsEditorSync();
+  updateNewsPreview();
+}
+function toggleNewsEditorMode(){
+  var ed=document.getElementById('news-editor');
+  var ta=document.getElementById('news-content');
+  var hint=document.getElementById('news-editor-hint');
+  var bt=document.getElementById('news-source-toggle');
+  if(!ed||!ta) return;
+  if(_newsHtmlMode){
+    ed.innerHTML=sanitizeHtml(ta.value||'');
+    ed.hidden=false;
+    ta.hidden=true;
+    _newsHtmlMode=false;
+    if(hint) hint.textContent='Editor visual';
+    if(bt) bt.innerHTML='<i class="fas fa-code"></i>';
+    updateNewsToolbar();
+  } else {
+    ta.value=ed.innerHTML;
+    ed.hidden=true;
+    ta.hidden=false;
+    _newsHtmlMode=true;
+    if(hint) hint.textContent='Modo HTML / markdown';
+    if(bt) bt.innerHTML='<i class="fas fa-eye"></i>';
+  }
+  newsEditorSync();
+  updateNewsPreview();
 }
 
 // ============================================================
