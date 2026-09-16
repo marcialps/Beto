@@ -3024,58 +3024,42 @@ function autoPlayYoutube(el,id,href,fallbackHtml){
     }catch(e){clearTimeout(stale);fb()}
   });
 }
-var _fbCallbacks=[];
-var _fbInjected=false;
-function ensureFacebookSdk(cb){
-  if(window.FB&&window.FB.init&&window.FB.XFBML&&window.FB.Event){cb();return}
-  _fbCallbacks.push(cb);
-  if(_fbInjected)return;
-  _fbInjected=true;
-  window.fbAsyncInit=function(){
-    try{if(window.FB&&window.FB.init)window.FB.init({xfbml:true,cookie:false,version:'v20.0'})}catch(e){}
-    setTimeout(function(){
-      var q=_fbCallbacks;_fbCallbacks=[];
-      q.forEach(function(f){try{f()}catch(e){}});
-    },300);
-  };
-  var d=document;var s='script';var id='facebook-jssdk';var js,fjs=d.getElementsByTagName(s)[0];
-  if(d.getElementById(id))return;
-  js=d.createElement(s);js.id=id;
-  js.src='https://connect.facebook.net/pt_BR/sdk.js#xfbml=1&version=v20.0';
-  if(fjs)fjs.parentNode.insertBefore(js,fjs);
+function fbVideoUrl(v,w){
+  var u=String(v||'').replace(/^https?:\/\//,'');
+  if(!u||!/^(www\.|m\.|web\.|business\.)?(facebook\.com|fb\.watch)\//.test(u))return null;
+  var full=(String(v).indexOf('http')===0)?String(v):'https://'+u;
+  var q='https://www.facebook.com/plugins/video.php?href='+encodeURIComponent(full)+'&autoplay=1&mute=1&loop=1&show_text=false&allowfullscreen=true&allowTransparency=true';
+  if(w)q+='&width='+Math.round(w);
+  return q;
 }
 function autoPlayFacebook(el,url){
   if(!el||!url)return;
-  var rendered=false;
   el.style.background='#000';
-  el.innerHTML='<div style="display:flex;align-items:center;justify-content:center;color:#d1fae5;font-size:13px;padding:52px 16px;text-align:center;min-height:200px"><i class="fas fa-spinner fa-spin mr-2"></i>Carregando v\u00eddeo do Facebook...</div>';
-  ensureFacebookSdk(function(){
-    if(rendered)return;
-    try{
-      if(window.FB&&window.FB.Event)window.FB.Event.subscribe('xfbml.render',function(){rendered=true});
-      el.innerHTML='<div class="fb-video" data-href="'+String(url)+'" data-autoplay="true" data-show-text="false" data-width="100%" data-allowfullscreen="true"></div>';
-      if(window.FB&&window.FB.XFBML)window.FB.XFBML.parse(el);
-    }catch(e){
-      if(!rendered)showFbPlugin(el,url);
+  if(el._ro)el._ro.disconnect();
+  function draw(){
+    var w=el.clientWidth||el.offsetWidth||560;
+    if(w<80)w=560;
+    if(el._w&&Math.abs(el._w-w)<40)return;
+    el._w=w;
+    var h=Math.round(w/1.78)+70;
+    var maxH=Math.round(window.innerHeight*0.78);
+    if(h>maxH)h=maxH;
+    el.innerHTML='<div style="width:100%;background:#000;text-align:center"><iframe src="'+fbVideoUrl(url,w)+'" title="V\u00eddeo do Facebook" style="width:100%;height:'+h+'px;border:none;overflow:hidden;background:#000" scrolling="no" frameborder="0" allowtransparency="true" allowfullscreen="true" allow="autoplay; fullscreen; picture-in-picture; encrypted-media"></iframe></div>';
+    var ifr=el.querySelector('iframe');
+    if(ifr&&!ifr._l){
+      ifr._l=true;
+      var ok=false;
+      var to=setTimeout(function(){
+        if(!ok)el.innerHTML='<div style="aspect-ratio:16/10;width:100%">'+fbThumbCard(url)+'</div>';
+      },12000);
+      ifr.addEventListener('load',function(){ok=true;clearTimeout(to)});
     }
-  });
-  setTimeout(function(){if(!rendered)showFbPlugin(el,url)},10000);
-}
-function showFbPlugin(el,url){
-  if(el.getAttribute('data-fb-mode')==='plugin')return;
-  el.setAttribute('data-fb-mode','plugin');
-  el.innerHTML=fbPluginHtml(url);
-  var ifr=el.querySelector('iframe');
-  if(ifr){
-    var ok=false;
-    ifr.addEventListener('load',function(){ok=true});
-    setTimeout(function(){
-      if(!ok)el.innerHTML='<div style="aspect-ratio:16/10;width:100%">'+fbThumbCard(url)+'</div>';
-    },10000);
   }
-}
-function fbPluginHtml(url){
-  return '<div style="width:100%;background:#000;text-align:center"><iframe src="'+fbVideoUrl(url)+'" title="V\u00eddeo do Facebook" style="width:100%;min-height:280px;height:min(560px,75vh);border:none;overflow:hidden;background:#000" scrolling="no" frameborder="0" allowtransparency="true" allowfullscreen="true" allow="autoplay; fullscreen; picture-in-picture; encrypted-media"></iframe></div>';
+  draw();
+  if(window.ResizeObserver&&!el._ro){
+    el._ro=new ResizeObserver(draw);
+    el._ro.observe(el);
+  }
 }
 function mediaEl(p){
   var cls='w-full h-full object-cover';
@@ -3376,7 +3360,7 @@ function showPromoPopup(){
     if(ytEmbedId(pv)){
       mediaHtml='<div id="promo-youtube" style="aspect-ratio:16/9;background:#000;position:relative"></div>';
     } else if(fbVideoUrl(pv)){
-      mediaHtml='<div id="promo-facebook" style="width:100%;background:#000;position:relative;min-height:260px"></div>';
+      mediaHtml='<div id="promo-facebook" style="width:100%;background:#000;position:relative"></div>';
     } else if(pv.indexOf('idb:')===0){
       mediaHtml='<video data-idb="'+pv+'" autoplay loop muted playsinline controls poster="'+imgPoster+'" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:contain;display:block;background:#000"></video>';
     } else {
@@ -3409,12 +3393,13 @@ function showPromoPopup(){
     '</div>';
   }
 
+  var cardW=pvid?'720px':'560px';
   var dv=document.createElement('div');
   dv.id='promo-popup';
   dv.style.cssText='position:fixed;inset:0;z-index:10000;display:flex;align-items:center;justify-content:center;padding:20px';
   dv.innerHTML=
     '<div style="position:absolute;inset:0;background:radial-gradient(circle at 50% 35%,rgba(5,60,44,0.6),rgba(1,12,8,0.88));backdrop-filter:blur(10px);animation:promoFade .4s ease both;z-index:10001" onclick="closePromoPopup()"></div>'+
-    '<div class="promo-card" style="position:relative;z-index:10002;max-width:560px;width:100%;max-height:calc(100vh - 40px);overflow:auto;border-radius:26px;box-shadow:0 40px 90px rgba(0,0,0,0.55);background:#000;overflow:hidden">'+
+    '<div class="promo-card" style="position:relative;z-index:10002;max-width:'+cardW+';width:100%;max-height:calc(100vh - 40px);overflow:auto;border-radius:26px;box-shadow:0 40px 90px rgba(0,0,0,0.55);background:#000;overflow:hidden">'+
       cardBody+
     '</div>';
   document.body.appendChild(dv);
