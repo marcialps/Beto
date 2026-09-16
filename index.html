@@ -1873,6 +1873,25 @@ function newsVideoHTML(n){
   if(vr.indexOf('idb:')===0) return '<div class="aspect-video rounded-2xl overflow-hidden bg-black mt-6"><video data-idb="'+vr+'" controls playsinline class="w-full h-full"></video></div>';
   return '<div class="aspect-video rounded-2xl overflow-hidden bg-black mt-6"><video src="'+vr+'" controls playsinline class="w-full h-full"></video></div>';
 }
+function newsUrl(id){
+  return location.href.split('#')[0]+'#'+encodeURIComponent('post='+id);
+}
+function clipboardFallback(txt){
+  var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');showToast('Link copiado!','success')}catch(e){showToast('N\u00e3o foi poss\u00edvel copiar o link','error')}
+  document.body.removeChild(ta);
+}
+function copyToClipboard(txt){
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(function(){showToast('Link copiado!','success')}).catch(function(){clipboardFallback(txt)});
+  }else{clipboardFallback(txt);}
+}
+function shareNewsInstagram(id){
+  var url=newsUrl(id);
+  if(navigator.share){navigator.share({title:document.title,text:'Confira essa not\u00edcia da Agrovel:',url:url}).catch(function(){});}
+  else copyToClipboard(url);
+}
 function blogCard(n){
   var vidTag=(n.video)?'<span class="absolute top-3 right-3 bg-red-600 text-white text-xs font-bold px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-lg"><i class="fas fa-play text-[9px]"></i>V\u00eddeo</span>':'';
   return '<article onclick="navigate(\'blog-post\',{newsId:\''+n.id+'\'})" class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-lg hover:-translate-y-1 transition-all cursor-pointer group">'+
@@ -2030,6 +2049,9 @@ function renderBlogPost(id){
   if(related.length>3)related=related.slice(0,3);
   var shareText=encodeURIComponent('Confira esse artigo agro da Agrovel: '+n.title);
   var shareUrl='https://wa.me/'+getWhatsAppNumber()+'?text='+shareText;
+  var nurl=newsUrl(n.id);
+  var fbShareUrl='https://www.facebook.com/sharer/sharer.php?u='+encodeURIComponent(nurl);
+  var waShareUrl='https://api.whatsapp.com/send?text='+encodeURIComponent('Confira essa not\u00edcia da Agrovel: '+n.title+' '+nurl);
   return '<div class="max-w-4xl mx-auto px-4 py-8 md:py-12 fade-in">'+
     '<nav class="text-sm text-gray-500 mb-6 flex items-center gap-2 flex-wrap">'+
       '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">In\u00edcio</button><i class="fas fa-chevron-right text-xs"></i>'+
@@ -2058,6 +2080,15 @@ function renderBlogPost(id){
         '</div>'+
         '<div class="news-body">'+newsToHtml(n.content)+'</div>'+
         (n.tags&&n.tags.length?'<div class="flex flex-wrap gap-2 mt-6 pt-6 border-t border-green-100">'+n.tags.map(function(t){return '<span class="text-xs bg-green-50 text-green-700 border border-green-200 px-3 py-1 rounded-full">#'+esc(t)+'</span>'}).join('')+'</div>':'')+
+        '<div class="mt-8 rounded-2xl border border-green-100 bg-gradient-to-br from-green-50 to-white p-6 md:p-8 text-center">'+
+          '<div class="font-bold text-gray-900 text-lg mb-1">Compartilhe esta not\u00edcia</div>'+
+          '<p class="text-sm text-gray-500 mb-5">Envie essa not\u00edcia para quem tamb\u00e9m vai gostar</p>'+
+          '<div class="flex flex-wrap items-center justify-center gap-3">'+
+            '<a href="'+waShareUrl+'" target="_blank" rel="noopener" class="flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white font-semibold px-5 py-3 rounded-xl transition-colors"><i class="fab fa-whatsapp text-lg"></i>WhatsApp</a>'+
+            '<a href="'+fbShareUrl+'" target="_blank" rel="noopener" class="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-3 rounded-xl transition-colors"><i class="fab fa-facebook-f"></i>Facebook</a>'+
+            '<button onclick="shareNewsInstagram(\''+n.id+'\')" class="flex items-center gap-2 bg-gradient-to-r from-amber-500 via-pink-600 to-purple-600 hover:opacity-90 text-white font-semibold px-5 py-3 rounded-xl transition-opacity"><i class="fab fa-instagram text-lg"></i>Instagram</button>'+
+          '</div>'+
+        '</div>'+
       '</div>'+
     '</div>'+
     '<div class="mt-8 rounded-2xl bg-gradient-to-r from-green-900 to-emerald-800 p-6 md:p-8 text-white flex flex-col md:flex-row md:items-center md:justify-between gap-4">'+
@@ -4558,7 +4589,9 @@ window.addEventListener('DOMContentLoaded', async function(){
     console.error('Firebase init error', e);
     setTimeout(function(){showToast('Erro ao conectar ao Firebase. Verifique sua conexao/internet.','error')},10);
   }
-  navigate('catalog');
+var sp=location.hash.replace(/^#/,'');
+  if(sp.indexOf('post=')===0)navigate('blog-post',{newsId:decodeURIComponent(sp.slice(5))});
+  else navigate('catalog');
   renderCartSidebar();
   renderCategoryNavs();
   setTimeout(function(){showPromoPopup();},600);
