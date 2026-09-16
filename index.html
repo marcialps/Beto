@@ -400,8 +400,8 @@ const DB = (function(){
   const pending = {};
   const timers = {};
 
-  var ANALYTICS_VERSION = 2;
-  function eventsMeta(){ return {analyticsVersion: ANALYTICS_VERSION}; }
+  const eventsCol = function(){ return fire.db? fire.db.collection('agrovel_data').doc('events').collection('items') : null; };
+  const _eventsBaseline = {};
 
   function defaultFor(key){
     switch(key){
@@ -426,25 +426,17 @@ const DB = (function(){
   }
 
   async function loadAll(){
-    const jobs = COLL.filter(function(k){return k!=='products'}).map(async function(key){
+    const jobs = COLL.filter(function(k){return k!=='products'&&k!=='events'}).map(async function(key){
       try{
         const ref = docRef(key);
         if(!ref){ mem[key]=defaultFor(key); return; }
         const snap = await ref.get();
         const data = (snap.exists && snap.data()) ? snap.data() : {};
         if(data.v!==undefined){
-          if(key==='events' && !data.meta){
-            // eventos legados sem marcador de versao = semente ficticia antiga;
-            // descarta e passa a coletar apenas dados reais a partir de agora.
-            mem[key] = [];
-            await ref.set({v:[], meta:eventsMeta()});
-          } else {
-            mem[key] = data.v;
-          }
+          mem[key] = data.v;
         } else {
           mem[key] = defaultFor(key);
-          if(key==='events') await ref.set({v:mem[key], meta:eventsMeta()});
-          else await ref.set({v:mem[key]});
+          await ref.set({v:mem[key]});
         }
       }catch(err){
         console.error('FB load '+key, err);
@@ -452,21 +444,81 @@ const DB = (function(){
       }
     });
     jobs.push(loadProducts());
+    jobs.push(loadEvents());
     await Promise.all(jobs);
+  }
+
+  async function loadEvents(){
+    if(!fire.db){ mem['events']=defaultFor('events'); return; }
+    try{
+      const ref = fire.db.collection('agrovel_data').doc('events');
+      const s = await ref.get();
+      if(s.exists){
+        const data = s.data()||{};
+        if(Array.isArray(data.v)&&data.v.length){
+          const col = eventsCol();
+          const batch = fire.db.batch();
+          data.v.forEach(function(e){ if(e&&e.id) batch.set(col.doc(e.id), e); });
+          await batch.commit();
+        }
+        await ref.delete();
+      }
+    }catch(e){ console.error('FB migrate events legacy', e); }
+    try{
+      const col = eventsCol();
+      const snap = await col.orderBy('ts','asc').get();
+      const arr = snap.docs.map(function(d){return d.data()});
+      mem['events'] = arr.length>10000 ? arr.slice(arr.length-10000) : arr;
+      Object.keys(_eventsBaseline).forEach(function(k){delete _eventsBaseline[k]});
+      mem['events'].forEach(function(e){ if(e&&e.id) _eventsBaseline[e.id]=JSON.stringify(e); });
+    }catch(e){
+      console.error('FB load events items', e);
+      mem['events'] = defaultFor('events');
+      Object.keys(_eventsBaseline).forEach(function(k){delete _eventsBaseline[k]});
+    }
   }
 
   function flushKey(key){
     timers[key]=null;
-    if(key==='products'){ return; }
+    if(key==='products') return;
+    if(key==='events') return flushEvents();
     if(!(key in pending)) return;
     const val=pending[key];
     delete pending[key];
     const ref=docRef(key);
     if(!ref) return;
-    const payload = (key==='events') ? {v:val, meta:eventsMeta()} : {v:val};
-    ref.set(payload).catch(function(err){
+    ref.set({v:val}).catch(function(err){
       console.error('FB write '+key, err);
       setTimeout(function(){showToast('Erro ao salvar "'+key+'" no Firebase. Verifique sua conexao.','error')},10);
+    });
+  }
+
+  function flushEvents(){
+    if(!fire.db){ delete pending['events']; return; }
+    const val = pending['events'];
+    delete pending['events'];
+    if(!Array.isArray(val)) return;
+    const col = eventsCol();
+    if(!col) return;
+    const writes = [];
+    val.forEach(function(e){
+      if(!e||!e.id) return;
+      const s = JSON.stringify(e);
+      if(_eventsBaseline[e.id]===s) return;
+      writes.push(e);
+    });
+    if(!writes.length) return;
+    const chunks = []; var i;
+    for(i=0;i<writes.length;i+=450) chunks.push(writes.slice(i,i+450));
+    Promise.all(chunks.map(function(chunk){
+      const batch = fire.db.batch();
+      chunk.forEach(function(e){ batch.set(col.doc(e.id), e); });
+      return batch.commit();
+    })).then(function(){
+      writes.forEach(function(w){ _eventsBaseline[w.id]=JSON.stringify(w); });
+    }).catch(function(err){
+      console.error('FB write events', err);
+      setTimeout(function(){showToast('Erro ao salvar "events" no Firebase. Verifique sua conexao.','error')},10);
     });
   }
 
@@ -570,6 +622,13 @@ const DB = (function(){
     _setFire:function(db){ fire.db=db; },
     _loadAll: loadAll,
     _flushAll: flushAll,
+    _clearEventsMemo:function(){
+      if(timers['events']) clearTimeout(timers['events']);
+      delete pending['events'];
+      mem['events']=[];
+      Object.keys(_eventsBaseline).forEach(function(k){delete _eventsBaseline[k]});
+      return true;
+    },
 
     g(key){ if(key in mem) return mem[key]; return defaultFor(key); },
     s(key,val){ mem[key]=val; persist(key); return true; },
@@ -2339,7 +2398,8 @@ function renderDashboard(){
         '<p class="text-gray-400 text-xs md:text-sm">Decisoes sobre produtos, marcas e ofertas baseadas em dados reais de navegacao &mdash; '+periodLabel+'</p></div>'+
       '<div class="flex items-center gap-2 flex-wrap">'+
         '<div class="flex bg-gray-100 rounded-xl p-1">'+ranges.map(rangeBut).join('')+'</div>'+
-        '<button onclick="resetAnalytics()" title="Zerar dados de analise" class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"><i class="fas fa-trash-alt text-sm"></i></button>'+
+        '<button onclick="exportAnalytics()" title="Baixar historico de analises (backup JSON)" class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 hover:text-green-600 hover:border-green-200 transition-colors"><i class="fas fa-download text-sm"></i></button>'+
+        '<button onclick="resetAnalytics()" title="Zerar contador (arquiva o historico e reinicia a contagem p/ nova campanha)" class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"><i class="fas fa-trash-alt text-sm"></i></button>'+
       '</div>'+
     '</div>'+
 
@@ -2446,11 +2506,51 @@ function setDashboardRange(n){
   renderAdminSection();
 }
 
-function resetAnalytics(){
-  if(!confirm('Zerar todos os dados de analise (buscas, views, consultas)?'))return;
-  DB.s('events',[]);
-  renderAdminSection();
-  showToast('Dados de analise zerados','warn');
+async function resetAnalytics(){
+  if(!confirm('Zerar o contador para acompanhar uma nova campanha?\n\nO historico atual sera ARQUIVADO em backup (pesquisavel no Firebase) e as contagens voltam a zero.'))return;
+  try{
+    var ev=(DB.events()||[]).slice();
+    var stamp=new Date().toISOString().replace(/[:.]/g,'-');
+    if(DB.fire.db){
+      var base=DB.fire.db.collection('agrovel_data').doc('events_archive').collection('resets').doc(stamp);
+      var parts=[];for(var i=0;i<ev.length;i+=1000)parts.push(ev.slice(i,i+1000));
+      await Promise.all(parts.map(function(part,idx){
+        return base.collection('partes').doc('p'+(idx+1)).set({events:part});
+      }));
+      await base.set({resetAt:new Date().toISOString(),count:ev.length,parts:parts.length});
+      DB._clearEventsMemo();
+      var col=DB.fire.db.collection('agrovel_data').doc('events').collection('items');
+      var snap=await col.get();
+      var ids=snap.docs.map(function(d){return d.id});
+      for(var k=0;k<ids.length;k+=450){
+        var b=DB.fire.db.batch();
+        ids.slice(k,k+450).forEach(function(id){b.delete(col.doc(id))});
+        await b.commit();
+      }
+    }else{
+      DB._clearEventsMemo();
+    }
+    renderAdminSection();
+    showToast('Contador zerado. Historico arquivado em backup ('+(ev.length||0)+' eventos).','warn');
+  }catch(e){
+    console.error('resetAnalytics',e);
+    showToast('Nao foi possivel zerar. Verifique a conexao.','error');
+  }
+}
+
+function exportAnalytics(){
+  try{
+    var ev=DB.events()||[];
+    var name='agrovel-analytics-'+new Date().toISOString().slice(0,10)+'.json';
+    var blob=new Blob([JSON.stringify({exportedAt:new Date().toISOString(),count:ev.length,events:ev},null,2)],{type:'application/json'});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement('a');
+    a.href=url;a.download=name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url)},100);
+    showToast('Historico baixado ('+ev.length+' eventos) GRAVADO com sucesso','success');
+  }catch(e){ showToast('Falha ao exportar dados','error'); }
 }
 
 function initDashboardCharts(){
