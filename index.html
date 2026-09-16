@@ -1874,7 +1874,7 @@ function newsVideoHTML(n){
   return '<div class="aspect-video rounded-2xl overflow-hidden bg-black mt-6"><video src="'+vr+'" controls playsinline class="w-full h-full"></video></div>';
 }
 function newsUrl(id){
-  return location.href.split('#')[0]+'#'+encodeURIComponent('post='+id);
+  return location.href.split('#')[0]+'#post='+id;
 }
 function clipboardFallback(txt){
   var ta=document.createElement('textarea');ta.value=txt;ta.style.position='fixed';ta.style.opacity='0';
