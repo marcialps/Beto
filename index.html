@@ -3327,7 +3327,9 @@ function closePromoPopup(){
 // ============================================================
 var _newsCover=null;
 var _newsVideo=null;
+var _newsVideoRemoved=false;
 var _newsDirHandle=null;
+var _newsVideoDirHandle=null;
 
 async function saveNewsMediaToFolder(file){
   if(!window.showDirectoryPicker) return null;
@@ -3347,6 +3349,27 @@ async function saveNewsMediaToFolder(file){
     await w.write(file);
     await w.close();
     return 'img/noticias/'+safeName;
+  }catch(e){return null}
+}
+
+async function saveNewsVideoToFolder(file){
+  if(!window.showDirectoryPicker) return null;
+  try{
+    var dir=_newsVideoDirHandle;
+    if(!dir){
+      showToast('Selecione a pasta video na janela seguinte','warn');
+      dir=await window.showDirectoryPicker({mode:'readwrite'});
+      _newsVideoDirHandle=dir;
+    }
+    var perm=await dir.queryPermission({mode:'readwrite'});
+    if(perm!=='granted') perm=await dir.requestPermission({mode:'readwrite'});
+    if(perm!=='granted') return null;
+    var safeName=Date.now()+'_'+file.name.replace(/[^A-Za-z0-9._-]+/g,'_');
+    var handle=await dir.getFileHandle(safeName,{create:true});
+    var w=await handle.createWritable();
+    await w.write(file);
+    await w.close();
+    return 'video/'+safeName;
   }catch(e){return null}
 }
 
@@ -3389,13 +3412,14 @@ function handleNewsVideoFile(input){
   if(!f) return;
   if(f.type.indexOf('video/')!==0){showToast('Somente arquivos de video','warn');input.value='';return}
   _newsVideo=null;
+  _newsVideoRemoved=false;
   var vid=document.getElementById('news-video');
   showToast('Enviando video, aguarde...');
-  saveNewsMediaToFolder(f).then(function(path){
+  saveNewsVideoToFolder(f).then(function(path){
     if(path){
       _newsVideo=path;
       if(vid){vid.value=path;vid.placeholder='';}
-      showToast('Video salvo em img/noticias');
+      showToast('Video salvo em video');
       updateMediaPreview();
     } else {
       storeMediaBlob(f,f.type||'video/mp4',function(ref){
@@ -3412,10 +3436,30 @@ function updateMediaPreview(){
   if(!el) return;
   var cur=DB.news().find(function(x){return x.id===State.editNewsId});
   var cover=_newsCover||document.getElementById('news-cover-url').value.trim()||(cur&&cur.cover)||'';
-  var video=_newsVideo||document.getElementById('news-video').value.trim()||(cur&&cur.video)||'';
+  var vidInp=document.getElementById('news-video');
+  var pending=_newsVideo||(vidInp?vidInp.value.trim():'')||'';
+  var video=pending;
+  if(!video&&cur&&cur.video&&!_newsVideoRemoved) video=cur.video;
   if(!cover&&!video){el.innerHTML='<span class="text-xs text-gray-400">Sem midia. Adicione uma capa e/ou video.</span>';return;}
-  el.innerHTML=mediaEl({image:cover,video:video});
+  var delBtn='';
+  if(video) delBtn='<div class="mt-2"><button type="button" onclick="removeNewsVideo()" class="w-full text-sm bg-red-50 hover:bg-red-100 text-red-600 font-medium py-2 rounded-xl border border-red-200 transition-colors"><i class="fas fa-trash mr-1.5"></i>Remover v\u00eddeo</button></div>';
+  el.innerHTML=mediaEl({image:cover,video:video})+delBtn;
   resolveIdbMedia(el);
+}
+
+function removeNewsVideo(){
+  _newsVideo=null;
+  _newsVideoRemoved=true;
+  var vid=document.getElementById('news-video');
+  if(vid){vid.value='';vid.placeholder='';}
+  updateMediaPreview();
+  showToast('V\u00eddeo removido. Salve para confirmar.','warn');
+}
+
+function newsVideoInput(){
+  var inp=document.getElementById('news-video');
+  if(inp&&inp.value.trim()) _newsVideoRemoved=false;
+  updateMediaPreview();
 }
 
 function updateNewsPreview(){
@@ -3525,7 +3569,7 @@ function renderNewsForm(id){
             '<input type="file" id="news-cover-file" accept="image/*" class="hidden" onchange="handleNewsCoverFile(this)">'+
             '<button type="button" onclick="document.getElementById(\'news-cover-file\').click()" class="w-full text-sm bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl border border-green-200 transition-colors"><i class="fas fa-cloud-upload-alt mr-1.5"></i>Enviar capa do dispositivo</button></div>'+
           '<div><label class="text-sm text-gray-600 mb-1 block">V\u00eddeo (YouTube, URL ou upload)</label>'+
-            '<input id="news-video" type="text" oninput="updateMediaPreview()" placeholder="https://www.youtube.com/watch?v=... ou https://.../video.mp4" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none mb-2">'+
+            '<input id="news-video" type="text" oninput="newsVideoInput()" placeholder="https://www.youtube.com/watch?v=... ou https://.../video.mp4" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none mb-2">'+
             '<input type="file" id="news-video-file" accept="video/*" class="hidden" onchange="handleNewsVideoFile(this)">'+
             '<button type="button" onclick="document.getElementById(\'news-video-file\').click()" class="w-full text-sm bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl border border-green-200 transition-colors"><i class="fas fa-cloud-upload-alt mr-1.5"></i>Enviar v\u00eddeo do dispositivo</button></div>'+
         '</div>'+
@@ -3547,6 +3591,7 @@ function initNewsForm(id){
   var n=id?DB.news().find(function(x){return x.id===id}):null;
   _newsCover=null;
   _newsVideo=null;
+  _newsVideoRemoved=false;
   if(n){if(n.cover)_newsCover=n.cover;if(n.video)_newsVideo=n.video;}
   var cu=document.getElementById('news-cover-url');
   if(cu) cu.value=(n&&n.cover&&String(n.cover).indexOf('data:')!==0&&String(n.cover).indexOf('idb:')!==0)?n.cover:'';
@@ -3565,7 +3610,7 @@ function saveNews(e,id){
   var title=f.get('title').trim();
   if(!title){showToast('Informe o t\u00edtulo da not\u00edcia','warn');return}
   var cover=_newsCover||document.getElementById('news-cover-url').value.trim()||null;
-  var video=_newsVideo||document.getElementById('news-video').value.trim()||null;
+  var video=_newsVideoRemoved?null:(_newsVideo||document.getElementById('news-video').value.trim()||null);
   var featured=f.get('featured')==='on';
   var active=f.get('active')==='on';
   var data={
@@ -3608,7 +3653,7 @@ function deleteNews(id){
   if(target){deleteMediaBlob(target.cover);deleteMediaBlob(target.video);}
   var news=DB.news().filter(function(x){return x.id!==id});
   DB.setNews(news);
-  if(State.editNewsId===id){State.editNewsId=null;_newsCover=null;_newsVideo=null;}
+  if(State.editNewsId===id){State.editNewsId=null;_newsCover=null;_newsVideo=null;_newsVideoRemoved=false;}
   showToast('Not\u00edcia exclu\u00edda','warn');
   renderAdminSection();
 }
