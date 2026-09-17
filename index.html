@@ -989,7 +989,7 @@ function imgFrame(src,p,i,opts){
   var mainCls=useCover?'img-cover':'img-contain';
   var extra=opts.extra||'';
   if(opts.hover) extra+=' group-hover:scale-105 transition-transform duration-500';
-  return '<img src="'+src+'" alt="'+(opts.alt||'')+'" style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
+  return '<img src="'+src+'" alt="'+(opts.alt||'')+'" '+(opts.lazy?'loading="lazy" ':'')+'style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
 }
 
 function thumbImg(src,p,i,alt){
@@ -1120,7 +1120,16 @@ function featPause(p){
 // ============================================================
 // VIEW: CATALOG
 // ============================================================
-function renderCatalog(){
+// Paginacao de exibicao: mostra 15 produtos por vez e um botao
+// "Carregar mais produtos" p/ nao travar o carregamento do catalogo.
+var CATALOG_PAGE_SIZE=15;
+var catalogVisibleCount=CATALOG_PAGE_SIZE;
+
+function resetCatalogPagination(){
+  catalogVisibleCount=CATALOG_PAGE_SIZE;
+}
+
+function getFilteredProducts(){
   const filters=DB.filters();
   const products=DB.products().filter(function(p){return p.active});
   let filtered=products;
@@ -1138,6 +1147,53 @@ function renderCatalog(){
   else if(filters.sort==='newest') filtered.sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
   else if(filters.sort==='alpha') filtered.sort(function(a,b){return a.name.localeCompare(b.name)});
   else filtered.sort(function(a,b){return(b.featured?1:0)-(a.featured?1:0)});
+  return filtered;
+}
+
+function renderCatalogGrid(filtered){
+  const shown=filtered.slice(0,catalogVisibleCount);
+  let html='<div id="catalog-grid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+
+    shown.map(function(p){return renderProductCard(p)}).join('')+
+  '</div>';
+  if(catalogVisibleCount<filtered.length){
+    html+='<div id="load-more-wrap" class="text-center mt-8">'+
+      '<button onclick="loadMoreProducts()" class="catalog-load-more inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold px-8 py-3 rounded-xl transition-all hover:shadow-lg">'+
+        '<i class="fas fa-plus-circle"></i> Carregar mais produtos'+
+      '</button>'+
+      '<p class="catalog-count text-xs text-gray-400 mt-3">Mostrando '+catalogVisibleCount+' de '+filtered.length+' produto'+(filtered.length!==1?'s':'')+'</p>'+
+    '</div>';
+  }
+  return html;
+}
+
+function loadMoreProducts(){
+  if(window._catalogLoadingMore)return;
+  window._catalogLoadingMore=true;
+  const filtered=getFilteredProducts();
+  const prev=catalogVisibleCount;
+  catalogVisibleCount=Math.min(catalogVisibleCount+CATALOG_PAGE_SIZE,filtered.length);
+  const grid=document.getElementById('catalog-grid');
+  if(grid&&prev<filtered.length){
+    grid.insertAdjacentHTML('beforeend',filtered.slice(prev,catalogVisibleCount).map(function(p){return renderProductCard(p)}).join(''));
+  }
+  const wrap=document.getElementById('load-more-wrap');
+  if(wrap){
+    if(catalogVisibleCount>=filtered.length){
+      wrap.innerHTML='<p class="text-center text-xs text-gray-400 mt-8"><i class="fas fa-check-circle text-green-500 mr-1"></i>Voce ja viu todos os '+filtered.length+' produto'+(filtered.length!==1?'s':'')+' cadastrado'+(filtered.length!==1?'s':'')+'.</p>';
+    } else {
+      wrap.innerHTML='<button onclick="loadMoreProducts()" class="catalog-load-more inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold px-8 py-3 rounded-xl transition-all hover:shadow-lg">'+
+        '<i class="fas fa-plus-circle"></i> Carregar mais produtos</button>'+
+        '<p class="catalog-count text-xs text-gray-400 mt-3">Mostrando '+catalogVisibleCount+' de '+filtered.length+' produto'+(filtered.length!==1?'s':'')+'</p>';
+    }
+  }
+  window._catalogLoadingMore=false;
+}
+
+function renderCatalog(){
+  const filters=DB.filters();
+  const products=DB.products().filter(function(p){return p.active});
+  const filtered=getFilteredProducts();
+  resetCatalogPagination();
 
   const allBrands=getAllBrands();
   const allSpecies=getAllSpecies();
@@ -1226,9 +1282,7 @@ function renderCatalog(){
           '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
           '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
           '<button onclick="clearFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button>'+
-        '</div>':'<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+
-          filtered.map(function(p){return renderProductCard(p)}).join('')+
-        '</div>')+
+        '</div>':renderCatalogGrid(filtered))+
       '</div>'+
     '</div>'+
   '</section>'+
@@ -1263,22 +1317,8 @@ function renderCatalog(){
 
 function updateCatalogResults(){
   var filters=DB.filters();
-  var products=DB.products().filter(function(p){return p.active});
-  var filtered=products;
-  if(filters.category) filtered=filtered.filter(function(p){return p.category===filters.category});
-  if(filters.species) filtered=filtered.filter(function(p){return p.species===filters.species});
-  if(filters.brand) filtered=filtered.filter(function(p){return p.brand===filters.brand});
-  if(filters.search){
-    var term=filters.search.toLowerCase();
-    filtered=filtered.filter(function(p){
-      var haystack=[p.name,p.description,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' ')].join(' ').toLowerCase();
-      return haystack.indexOf(term)>=0;
-    });
-  }
-  if(filters.sort==='rating') filtered.sort(function(a,b){return b.rating-a.rating});
-  else if(filters.sort==='newest') filtered.sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
-  else if(filters.sort==='alpha') filtered.sort(function(a,b){return a.name.localeCompare(b.name)});
-  else filtered.sort(function(a,b){return(b.featured?1:0)-(a.featured?1:0)});
+  var filtered=getFilteredProducts();
+  resetCatalogPagination();
 
   var cw=document.getElementById('catalog-carousel-wrap');
   if(cw) cw.style.display=(filters.category||filters.search||filters.species||filters.brand)?'none':'block';
@@ -1298,9 +1338,7 @@ function updateCatalogResults(){
     '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
     '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
     '<button onclick="clearFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button>'+
-  '</div>':'<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+
-    filtered.map(function(p){return renderProductCard(p)}).join('')+
-  '</div>');
+  '</div>':renderCatalogGrid(filtered));
 
   var area=document.getElementById('catalog-grid-area');
   if(area) area.innerHTML=html;
@@ -1309,7 +1347,7 @@ function updateCatalogResults(){
 function renderProductCard(p){
   return'<div class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
     '<div class="relative overflow-hidden h-52 bg-white">'+
-      imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'6%'})+
+      imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'6%',lazy:true})+
       (p.featured?'<div class="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-star mr-1"></i>Destaque</div>':'')+
       (p.prescription?'<div class="absolute bottom-3 right-3 bg-amber-500/90 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-prescription mr-1"></i>Receita</div>':'')+
       '<div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">'+
