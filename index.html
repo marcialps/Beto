@@ -560,21 +560,53 @@ const DB = (function(){
   const productsCol = function(){ return fire.db? fire.db.collection('agrovel_data').doc('products').collection('items') : null; };
   const _productsBaseline = {};
   let _productsDirty = false;
+  // Leitura paginada no Firestore: a primeira carga traz poucos produtos
+  // para o catalogo aparecer rapido; o restante continua em segundo plano.
+  const PRODUCTS_FIRST_BATCH = 20;
+  const PRODUCTS_PAGE_SIZE = 500;
+  let _productsLoadGen = 0;
+
+  async function _loadProductPages(col, firstDocs, firstLimit, gen){
+    try{
+      var last = firstDocs[firstDocs.length-1];
+      var pageCount = firstDocs.length;
+      var limit = firstLimit;
+      while(pageCount===limit){
+        if(_productsLoadGen!==gen) return;
+        limit = PRODUCTS_PAGE_SIZE;
+        const q = col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit);
+        const snap = await q.get();
+        if(_productsLoadGen!==gen) return;
+        if(snap.empty) break;
+        const arr = snap.docs.map(function(d){return d.data()});
+        arr.forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
+        mem['products'] = mem['products'].concat(arr);
+        pageCount = snap.size;
+        last = snap.docs[snap.docs.length-1];
+        try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+      }
+    }catch(e){
+      console.error('FB load products pages', e);
+      if(_productsLoadGen===gen) mem['_loadError']='products';
+    }
+  }
 
   async function loadProducts(){
     if(!fire.db){ mem['products']=defaultFor('products'); return; }
-    var networkError=false;
+    const gen = ++_productsLoadGen;
     try{
       const col = productsCol();
-      const snap = await col.get();
-      if(!snap.empty){
-        mem['products'] = snap.docs.map(function(d){return d.data()});
+      const first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
+      if(_productsLoadGen!==gen) return;
+      if(!first.empty){
+        mem['products'] = first.docs.map(function(d){return d.data()});
         Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
         mem['products'].forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
         clearProductsError();
+        _loadProductPages(col, first.docs, PRODUCTS_FIRST_BATCH, gen);
         return;
       }
-    }catch(e){ console.error('FB load products sub', e); networkError=true; }
+    }catch(e){ console.error('FB load products sub', e); }
     try{
       const ref = fire.db.collection('agrovel_data').doc('products');
       const s = await ref.get();
@@ -591,11 +623,11 @@ const DB = (function(){
         clearProductsError();
         return;
       }
-    }catch(e){ console.error('FB load products legacy', e); networkError=true; }
+    }catch(e){ console.error('FB load products legacy', e); }
     // Nunca exibir produtos de exemplo (DEFAULT_PRODUCTS) no catalogo.
     // Se o Firestore nao respondeu, fica vazio + indicador de erro p/ retry.
     mem['products'] = defaultFor('products');
-    if(networkError) mem['_loadError']='products';
+    mem['_loadError']='products';
   }
 
   async function flushProducts(){
@@ -1189,6 +1221,19 @@ function loadMoreProducts(){
   window._catalogLoadingMore=false;
 }
 
+var _productsGrewPending=false;
+function notifyProductsGrew(){
+  if(State.view!=='catalog') return;
+  if(_productsGrewPending) return;
+  _productsGrewPending=true;
+  setTimeout(function(){
+    _productsGrewPending=false;
+    if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
+      updateCatalogResults(true);
+    }
+  },0);
+}
+
 function renderCatalog(){
   const filters=DB.filters();
   const products=DB.products().filter(function(p){return p.active});
@@ -1315,10 +1360,10 @@ function renderCatalog(){
   '</div>';
 }
 
-function updateCatalogResults(){
+function updateCatalogResults(keepPage){
   var filters=DB.filters();
   var filtered=getFilteredProducts();
-  resetCatalogPagination();
+  if(!keepPage) resetCatalogPagination();
 
   var cw=document.getElementById('catalog-carousel-wrap');
   if(cw) cw.style.display=(filters.category||filters.search||filters.species||filters.brand)?'none':'block';
