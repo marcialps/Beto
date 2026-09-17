@@ -431,7 +431,9 @@ const DB = (function(){
 
   function defaultFor(key){
     switch(key){
-      case 'products': return DEFAULT_PRODUCTS;
+      // IMPORTANTE: nunca exibir produtos de exemplo como se fossem reais.
+      // Se o Firestore nao respondeu/vazio, o catalogo fica vazio.
+      case 'products': return [];
       case 'orders':   return DEFAULT_ORDERS;
       case 'customers':return DEFAULT_CUSTOMERS;
       case 'users':    return DEFAULT_USERS;
@@ -452,6 +454,8 @@ const DB = (function(){
   }
 
   async function loadAll(){
+    mem['_loading']=true;
+    mem['_loadError']=false;
     const jobs = COLL.filter(function(k){return k!=='products'&&k!=='events'}).map(async function(key){
       try{
         const ref = docRef(key);
@@ -472,6 +476,11 @@ const DB = (function(){
     jobs.push(loadProducts());
     jobs.push(loadEvents());
     await Promise.all(jobs);
+    mem['_loading']=false;
+  }
+
+  function clearProductsError(){
+    if(mem['_loadError']==='products') mem['_loadError']=false;
   }
 
   async function loadEvents(){
@@ -554,6 +563,7 @@ const DB = (function(){
 
   async function loadProducts(){
     if(!fire.db){ mem['products']=defaultFor('products'); return; }
+    var networkError=false;
     try{
       const col = productsCol();
       const snap = await col.get();
@@ -561,9 +571,10 @@ const DB = (function(){
         mem['products'] = snap.docs.map(function(d){return d.data()});
         Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
         mem['products'].forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
+        clearProductsError();
         return;
       }
-    }catch(e){ console.error('FB load products sub', e); }
+    }catch(e){ console.error('FB load products sub', e); networkError=true; }
     try{
       const ref = fire.db.collection('agrovel_data').doc('products');
       const s = await ref.get();
@@ -577,10 +588,14 @@ const DB = (function(){
         data.v.forEach(function(p){ if(p&&p.id) batch.set(col.doc(p.id), p); });
         await batch.commit();
         try{ await ref.delete(); }catch(e){ console.error('FB migrate legacy removed', e); }
+        clearProductsError();
         return;
       }
-    }catch(e){ console.error('FB load products legacy', e); }
+    }catch(e){ console.error('FB load products legacy', e); networkError=true; }
+    // Nunca exibir produtos de exemplo (DEFAULT_PRODUCTS) no catalogo.
+    // Se o Firestore nao respondeu, fica vazio + indicador de erro p/ retry.
     mem['products'] = defaultFor('products');
+    if(networkError) mem['_loadError']='products';
   }
 
   async function flushProducts(){
@@ -659,7 +674,7 @@ const DB = (function(){
     g(key){ if(key in mem) return mem[key]; return defaultFor(key); },
     s(key,val){ mem[key]=val; persist(key); return true; },
 
-    products(){return this.g('products')||DEFAULT_PRODUCTS},
+    products(){return this.g('products')||[]},
     setProducts(v){ mem['products']=v; markProductsDirty(); return true; },
     orders(){return this.g('orders')||DEFAULT_ORDERS},
     setOrders(v){ mem['orders']=v; persist('orders'); return true; },
@@ -704,6 +719,10 @@ const DB = (function(){
     setNews(v){ mem['news']=v; persist('news'); return true; },
     categories(){return this.g('categories')},
     setCategories(v){ mem['categories']=v; persist('categories'); return true; },
+    _markLoadError:function(v){ mem['_loadError']=v||true; return true; },
+    loadError:function(){ return mem['_loadError']?true:false; },
+    isLoading:function(){ return mem['_loading']?true:false; },
+    setLoading:function(v){ mem['_loading']=!!v; return true; },
   };
 })();
 
@@ -1125,6 +1144,12 @@ function renderCatalog(){
   const featured=products.filter(function(p){return p.featured}).slice(0,5);
 
   return'<div class="fade-in">'+
+  (DB.loadError()?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
+    '<div class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">'+
+      '<div class="flex-1"><strong><i class="fas fa-exclamation-triangle mr-1"></i> Ca&aacute;logo temporariamente indispon&iacute;vel.</strong> N&atilde;o foi poss&iacute;vel carregar os produtos cadastrados. Verifique sua conex&atilde;o e tente novamente.</div>'+
+      '<button id="catalog-retry-btn" onclick="retryCatalogLoad()" class="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded-xl transition-colors">Tentar novamente</button>'+
+    '</div>'+
+  '</div>':'')+
   '<div id="catalog-carousel-wrap" style="display:'+(filters.category||filters.search||filters.species||filters.brand?'none':'block')+'">'+renderFeaturedCarousel(featured)+'</div>'+
 
   '<section id="catalog-section" class="max-w-7xl mx-auto px-4 py-10">'+
@@ -4714,17 +4739,83 @@ function copyPanelDesc(){if(_panelDesc)navigator.clipboard.writeText(_panelDesc)
 function applyPanelDescToForm(){const ta=document.getElementById('desc-textarea');if(ta&&_panelDesc){ta.value=_panelDesc;closeAllPanels();showToast('Descricao aplicada!');_generatedDesc=_panelDesc}else{showToast('Abra o formulario de produto primeiro','warn')}}
 
 // ============================================================
+// CARGA INICIAL - timeout, retry e estados de erro
+// (nunca exibir dados de exemplo quando o Firebase falha/lento)
+// ============================================================
+let _fbInitDone=false;
+function ensureFirebaseApp(){
+  if(_fbInitDone) return;
+  if(firebase.apps&&firebase.apps.length) return;
+  firebase.initializeApp(firebaseConfig);
+  _fbInitDone=true;
+}
+function timeoutRace(promise, ms, label){
+  return new Promise(function(resolve){
+    var settled=false;
+    var timer=setTimeout(function(){
+      if(settled) return;
+      settled=true;
+      console.warn('Timeout ao carregar dados ('+label+')');
+      resolve({timedOut:true});
+    }, ms);
+    promise.then(function(res){
+      if(settled) return;
+      settled=true; clearTimeout(timer);
+      resolve({timedOut:false, result:res});
+    }).catch(function(err){
+      if(settled) return;
+      settled=true; clearTimeout(timer);
+      resolve({timedOut:false, error:err});
+    });
+  });
+}
+function loadingSplash(){
+  return '<div class="flex flex-col items-center justify-center min-h-[55vh] text-green-800 px-6">'+
+    '<div class="w-14 h-14 border-4 border-green-200 border-t-green-700 rounded-full animate-spin mb-5"></div>'+
+    '<p class="text-base font-semibold">Carregando cat&aacute;logo...</p>'+
+    '<p class="text-xs text-gray-400 mt-1">Aguarde, conectando ao servidor</p>'+
+  '</div>';
+}
+async function retryCatalogLoad(){
+  var btn=document.getElementById('catalog-retry-btn');
+  if(btn){btn.disabled=true;btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Carregando...';}
+  try{
+    ensureFirebaseApp();
+    const db=firebase.firestore();
+    DB._setFire(db);
+    DB.setLoading(true);
+    var r=await timeoutRace(DB._loadAll(),15000,'retry loadAll');
+    if(r.timedOut){ DB._markLoadError('timeout'); }
+    DB.setLoading(false);
+  }catch(e){
+    console.error('Firebase retry error',e);
+    DB._markLoadError('init');
+    DB.setLoading(false);
+  }
+  if(State.view==='catalog'||State.view==='admin') render();
+  else navigate('catalog');
+  if(btn) btn.disabled=false;
+}
+
+// ============================================================
 // INIT
 // ============================================================
 window.addEventListener('DOMContentLoaded', async function(){
+  var mc=document.getElementById('main-content');
+  if(mc) mc.innerHTML=loadingSplash();
   try{
-    firebase.initializeApp(firebaseConfig);
+    ensureFirebaseApp();
     const db = firebase.firestore();
     DB._setFire(db);
-    await DB._loadAll();
+    DB.setLoading(true);
+    var r=await timeoutRace(DB._loadAll(),12000,'loadAll');
+    if(r.timedOut){ DB._markLoadError('timeout'); }
+    DB.setLoading(false);
     initAuth();
   }catch(e){
     console.error('Firebase init error', e);
+    DB._markLoadError('init');
+    DB.setLoading(false);
     setTimeout(function(){showToast('Erro ao conectar ao Firebase. Verifique sua conexao/internet.','error')},10);
   }
 var sp=location.hash.replace(/^#/,'');
