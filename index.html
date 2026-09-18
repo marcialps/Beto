@@ -1096,14 +1096,116 @@ function navigate(view,params){
   const user=DB.currentUser();
   if(view.startsWith('admin')&&!user){navigate('login');return}
   if(view.startsWith('admin')&&user&&user.role==='guest'){showToast('Sem permissao para esta area','error');return}
-  if(view==='admin'&&user&&user.role==='seller'){State.adminSection='products';State.view='admin';render();return}
+  if(view==='admin'&&user&&user.role==='seller'){State.adminSection='products';State.view='admin';render();appPushState();return}
   var mm=document.getElementById('mobile-menu');
   if(mm)mm.classList.remove('open');
   State.view=view;
   Object.assign(State,params);
   render();
   window.scrollTo({top:0,behavior:'smooth'});
+  appPushState();
 }
+
+// ============================================================
+// HISTORICO / HASH
+// Integra a navegacao do site com o historico do navegador
+// (URL #hash). Assim os botoes voltar/avancar funcionam dentro
+// do site e a busca/filtros do catalogo sao mantidos ao voltar.
+// ============================================================
+var _appNavDepth=0;
+
+function buildNavHash(){
+  var S=State, parts=['v='+encodeURIComponent(S.view)];
+  if(S.view==='product'&&S.productId) parts.push('p='+encodeURIComponent(S.productId));
+  if(S.view==='blog-post'&&S.newsId) return '#post='+encodeURIComponent(S.newsId);
+  if(S.view==='admin'&&S.adminSection&&S.adminSection!=='dashboard') parts.push('s='+encodeURIComponent(S.adminSection));
+  if(S.view==='blog'){
+    if(S.blogCategory) parts.push('bc='+encodeURIComponent(S.blogCategory));
+    if(S.blogSearch) parts.push('bs='+encodeURIComponent(S.blogSearch));
+  }
+  if(S.view==='confirmation'&&S.orderId) parts.push('id='+encodeURIComponent(S.orderId));
+  var f=DB.filters();
+  if(f.category) parts.push('c='+encodeURIComponent(f.category));
+  if(f.species) parts.push('sp='+encodeURIComponent(f.species));
+  if(f.brand) parts.push('b='+encodeURIComponent(f.brand));
+  if(f.search) parts.push('q='+encodeURIComponent(f.search));
+  if(f.sort&&f.sort!=='featured') parts.push('o='+encodeURIComponent(f.sort));
+  return '#'+parts.join('&');
+}
+
+function parseNavHash(){
+  var h=(location.hash||'').replace(/^#/,'');
+  var noFilters={category:'',species:'',brand:'',search:'',sort:'featured'};
+  if(!h) return null;
+  if(h.indexOf('post=')===0) return {state:{view:'blog-post',newsId:decodeURIComponent(h.slice(5))},filters:noFilters};
+  var p={};
+  h.split('&').forEach(function(kv){
+    if(!kv) return;
+    var i=kv.indexOf('=');
+    if(i<0){p[kv]='';return;}
+    p[kv.slice(0,i)]=decodeURIComponent(kv.slice(i+1));
+  });
+  if(!p.v) return null;
+  var st={view:p.v};
+  if(p.v==='product'&&p.p) st.productId=p.p;
+  if(p.v==='admin'&&p.s) st.adminSection=p.s;
+  if(p.v==='blog'){
+    if(p.bc!==undefined) st.blogCategory=p.bc||'';
+    if(p.bs!==undefined) st.blogSearch=p.bs||'';
+  }
+  if(p.v==='confirmation'&&p.id) st.orderId=p.id;
+  return {state:st,filters:{category:p.c||'',species:p.sp||'',brand:p.b||'',search:p.q||'',sort:p.o||'featured'}};
+}
+
+function applyNavState(parsed,opts){
+  opts=opts||{};
+  var st=parsed&&parsed.state?parsed.state:null;
+  if(st&&st.view){
+    if(st.view.indexOf('admin')===0){
+      var user=DB.currentUser();
+      if(!user){navigate('login');return;}
+      if(user.role==='guest'){navigate('catalog');return;}
+    }
+    State.view=st.view;
+    if(st.productId!==undefined) State.productId=st.productId;
+    if(st.adminSection!==undefined) State.adminSection=st.adminSection;
+    if(st.newsId!==undefined) State.newsId=st.newsId;
+    if(st.blogCategory!==undefined) State.blogCategory=st.blogCategory;
+    if(st.blogSearch!==undefined) State.blogSearch=st.blogSearch;
+    if(st.orderId!==undefined) State.orderId=st.orderId;
+  }
+  if(parsed&&parsed.filters) DB.setFilters(parsed.filters);
+  render();
+  if(opts.scroll!==false) window.scrollTo({top:0,behavior:'smooth'});
+}
+
+function appPushState(){
+  try{
+    var h=buildNavHash();
+    if(location.hash===h) return;
+    _appNavDepth+=1;
+    history.pushState({t:'agrovel',d:_appNavDepth}, '', h);
+  }catch(e){}
+}
+
+function syncNavHash(){
+  try{
+    history.replaceState({t:'agrovel',d:_appNavDepth}, '', buildNavHash());
+  }catch(e){}
+}
+
+function goAppBack(){
+  if(_appNavDepth>0) history.back();
+  else navigate('catalog');
+}
+
+window.addEventListener('popstate',function(){
+  if(window.history.state&&window.history.state.t==='agrovel') _appNavDepth=window.history.state.d||0;
+  else _appNavDepth=0;
+  var parsed=parseNavHash();
+  if(parsed) applyNavState(parsed);
+  else applyNavState({state:{view:'catalog'},filters:{category:'',species:'',brand:'',search:'',sort:'featured'}});
+});
 
 function render(){
   const isAdm=State.view==='admin';
@@ -1644,12 +1746,13 @@ function updateSearch(val){
   if(val&&val.trim().length>=2)trackSearch(val.trim());
   clearTimeout(window._st);
   window._st=setTimeout(function(){
-    if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
+    if(State.view!=='catalog') return;
+    if(document.getElementById('catalog-grid-area')){
       updateCatalogResults();
     } else {
-      State.view='catalog';
       render();
     }
+    syncNavHash();
   },300);
 }
 
@@ -1659,11 +1762,11 @@ function clearSearch(){
   updateSearch('');
   if(document.getElementById('search-input'))document.getElementById('search-input').focus();
 }
-function updateSort(val){const f=DB.filters();f.sort=val;DB.setFilters(f);render()}
-function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;DB.setFilters(f);render()}
-function toggleSpecies(s){const f=DB.filters();const next=f.species===s?'':s;if(next)trackEvent('filter',{kind:'species',value:s});f.species=next;DB.setFilters(f);render()}
-function toggleBrand(b){const f=DB.filters();const next=f.brand===b?'':b;if(next)trackEvent('filter',{kind:'brand',value:b});f.brand=next;DB.setFilters(f);render()}
-function clearFilters(){DB.setFilters({category:'',species:'',brand:'',search:'',sort:'featured'});render()}
+function updateSort(val){const f=DB.filters();f.sort=val;DB.setFilters(f);syncNavHash();render()}
+function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;DB.setFilters(f);syncNavHash();render()}
+function toggleSpecies(s){const f=DB.filters();const next=f.species===s?'':s;if(next)trackEvent('filter',{kind:'species',value:s});f.species=next;DB.setFilters(f);syncNavHash();render()}
+function toggleBrand(b){const f=DB.filters();const next=f.brand===b?'':b;if(next)trackEvent('filter',{kind:'brand',value:b});f.brand=next;DB.setFilters(f);syncNavHash();render()}
+function clearFilters(){DB.setFilters({category:'',species:'',brand:'',search:'',sort:'featured'});syncNavHash();render()}
 function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'featured'});navigate('catalog')}
 function submitContactForm(){
   const name=document.getElementById('contact-name').value.trim();
@@ -1695,6 +1798,7 @@ function renderProductDetail(id){
   const mf=focalOf(p,0);
   return'<div class="max-w-7xl mx-auto px-4 py-6 md:py-10 fade-in">'+
     '<nav class="text-xs md:text-sm text-gray-500 mb-4 md:mb-6 flex items-center gap-2 flex-wrap">'+
+      (_appNavDepth>0?'<button onclick="goAppBack()" class="inline-flex items-center gap-1.5 hover:text-green-700 font-semibold"><i class="fas fa-arrow-left text-xs"></i>Voltar</button><i class="fas fa-chevron-right text-xs"></i>':'')+
       '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">Inicio</button>'+
       '<i class="fas fa-chevron-right text-xs"></i>'+
       '<button onclick="filterCategory(\''+p.category+'\')" class="hover:text-green-700">'+p.category+'</button>'+
@@ -2324,7 +2428,7 @@ function renderBlog(){
     '</section>'+
   '</div>';
 }
-function setBlogCategory(cat){State.blogCategory=cat||'';render();}
+function setBlogCategory(cat){State.blogCategory=cat||'';syncNavHash();render();}
 function updateBlogResults(){
   var all=(DB.news()||[]).filter(function(n){return n.active});
   var filter=State.blogCategory||'';
@@ -2355,14 +2459,16 @@ function updateBlogResults(){
 }
 function updateBlogSearch(val){
   State.blogSearch=val;
+  syncNavHash();
   if(val&&val.trim().length>=2)trackSearch(val.trim());
   if(window._bs)clearTimeout(window._bs);
   window._bs=setTimeout(function(){
+    if(State.view!=='blog') return;
     if(document.getElementById('blog-grid-area')){updateBlogResults();}
     else{render();}
   },250);
 }
-function clearBlogFilters(){State.blogCategory='';State.blogSearch='';render();}
+function clearBlogFilters(){State.blogCategory='';State.blogSearch='';syncNavHash();render();}
 function renderBlogPost(id){
   var news=DB.news();
   var idx=news.findIndex(function(x){return x.id===id});
@@ -2381,6 +2487,7 @@ function renderBlogPost(id){
   var waShareUrl='https://api.whatsapp.com/send?text='+encodeURIComponent('Confira essa not\u00edcia da Agrovel: '+n.title+' '+nurl);
   return '<div class="max-w-4xl mx-auto px-4 py-8 md:py-12 fade-in">'+
     '<nav class="text-sm text-gray-500 mb-6 flex items-center gap-2 flex-wrap">'+
+      (_appNavDepth>0?'<button onclick="goAppBack()" class="inline-flex items-center gap-1.5 hover:text-green-700 font-semibold"><i class="fas fa-arrow-left text-xs"></i>Voltar</button><i class="fas fa-chevron-right text-xs"></i>':'')+
       '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">In\u00edcio</button><i class="fas fa-chevron-right text-xs"></i>'+
       '<button onclick="navigate(\'blog\')" class="hover:text-green-700">AGROVELinforma</button><i class="fas fa-chevron-right text-xs"></i>'+
       '<span class="text-gray-800 font-medium line-clamp-1">'+esc(n.title)+'</span>'+
@@ -5126,9 +5233,13 @@ window.addEventListener('DOMContentLoaded', async function(){
   var useCache=DB._loadCache();
 
   function renderInitial(){
-    var sp=location.hash.replace(/^#/,'');
-    if(sp.indexOf('post=')===0)navigate('blog-post',{newsId:decodeURIComponent(sp.slice(5))});
-    else navigate('catalog');
+    var parsed=parseNavHash();
+    if(parsed){
+      _appNavDepth=0;
+      applyNavState(parsed,{scroll:false});
+    }else{
+      navigate('catalog');
+    }
     renderCartSidebar();
     renderCategoryNavs();
   }
