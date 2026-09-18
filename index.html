@@ -9,7 +9,6 @@
 <title>Agrovel — Mais que Produtos, Soluções</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
@@ -263,12 +262,20 @@
 // DEFAULT DATA
 // ============================================================
 const DEFAULT_CATEGORIES = ['Racoes','Medicamentos','Equipamentos','Ferramentas','Sementes','Fertilizantes','Pet Shop','EPIs'];
-function getCategories(){return DB.g('categories')||DEFAULT_CATEGORIES}
+function getCategories(){
+  var c=DB.g('categories');
+  if(Array.isArray(c)&&c.length) return c;
+  var from=DB.products().filter(function(p){return p&&p.active&&p.category}).map(function(p){return p.category});
+  var seen={},res=[];
+  from.forEach(function(x){ if(!seen[x]){seen[x]=1;res.push(x);} });
+  return res;
+}
 
 const NEWS_CATEGORIES = ['Notícias','Dicas','Eventos','Manejo','Tecnologia','Clínica','Promoções'];
 
 const ALL_SPECIES = ['Caes','Gatos','Equinos','Bovinos','Aves','Suinos','Ovinos','Peixes'];
 
+/*
 const DEFAULT_PRODUCTS = [
   {id:'p1',name:'Racao Premium Caes Adultos 15kg',description:'Racao super premium para caes adultos. Proteina animal de alta qualidade, arroz integral, fibras prebioticas e omega 3 e 6 para pele e pelagem. Livre de corantes.',price:189.90,originalPrice:219.90,category:'Racoes',tags:['caes','adulto','premium','15kg'],brand:'Royal Canin',species:'Caes',unitType:'kg',unitQty:15,techInfo:'Proteina 26% | Omega 3: 0.3% | Omega 6: 2.5%',prescription:false,images:['https://picsum.photos/seed/racao-caes-15/600/500','https://picsum.photos/seed/racao-caes-15-2/600/500'],stock:42,sku:'RCA-001',rating:4.9,reviews:87,featured:true,active:true,createdAt:'2024-10-01'},
   {id:'p2',name:'Racao Gatos Castrados 7.5kg',description:'Racao para gatos castrados, baixo teor de gordura e alto teor de proteina. Auxilia controle de peso e saude urinaria. L-carnitina e taurina.',price:159.90,originalPrice:null,category:'Racoes',tags:['gatos','castrado','premium','7.5kg'],brand:'Royal Canin',species:'Gatos',unitType:'kg',unitQty:7.5,techInfo:'Proteina 32% | Gordura 12% | Taurina 0.1%',prescription:false,images:['https://picsum.photos/seed/racao-gatos/600/500','https://picsum.photos/seed/racao-gatos2/600/500'],stock:35,sku:'RGA-001',rating:4.8,reviews:62,featured:true,active:true,createdAt:'2024-10-05'},
@@ -296,7 +303,7 @@ const DEFAULT_PRODUCTS = [
   {id:'p23',name:'Bota de Borracha Rural Preta',description:'Bota de borracha para trabalhos rurais e pesados. Solado antiderrapante, forro interno em algodao e palmilha removivel. Cano medio (38cm). Resistente a lama e produtos quimicos.',price:89.90,originalPrice:109.90,category:'EPIs',tags:['bota','borracha','rural','preta','impermeavel'],brand:'Bracol',species:null,unitType:'par',unitQty:1,techInfo:'Borracha natural | Cano 38cm | Solado antiderrapante | Tam 35-44',prescription:false,images:['https://picsum.photos/seed/bota-rural/600/500','https://picsum.photos/seed/bota-rural2/600/500'],stock:36,sku:'EPI-002',rating:4.7,reviews:59,featured:false,active:true,createdAt:'2024-08-18'},
   {id:'p24',name:'Aspersor para Irrigacao Setorial',description:'Aspersor setorial de impacto para irrigacao de pastagens e culturas. Alcance de 12 a 18 metros de raio. Angulo ajustavel de 20 a 360 graus. Conexao para mangueira 3/4.',price:45.90,originalPrice:null,category:'Equipamentos',tags:['aspersor','irrigacao','setorial','impacto'],brand:'Faber',species:null,unitType:'un',unitQty:1,techInfo:'Raio 12-18m | Angulo 20-360 | Conexao 3/4 | Vazao 1.500 L/h',prescription:false,images:['https://picsum.photos/seed/aspersor/600/500','https://picsum.photos/seed/aspersor2/600/500'],stock:44,sku:'EQU-004',rating:4.4,reviews:23,featured:false,active:true,createdAt:'2024-09-18'}
 ];
-
+*/
 
 
 const DEFAULT_NEWS = [
@@ -380,10 +387,11 @@ const DEFAULT_NEWS = [
 
 const DEFAULT_USERS = [
   {id:'u1',name:'Administrador',email:'beto@agrovel.com',password:'admin123',role:'admin',avatar:'AD'},
-  {id:'u2',name:'Vendedor',email:'vendedor@agrovet.com',password:'vend123',role:'seller',avatar:'VE'},
-  {id:'u3',name:'Convidado',email:'convidado@agrovet.com',password:'conv123',role:'guest',avatar:'CO'}
+  //{id:'u2',name:'Vendedor',email:'vendedor@agrovet.com',password:'vend123',role:'seller',avatar:'VE'},
+  //{id:'u3',name:'Convidado',email:'convidado@agrovet.com',password:'conv123',role:'guest',avatar:'CO'}
 ];
 
+/*
 const DEFAULT_CUSTOMERS = [
   {id:'c1',name:'Joao Fazendeiro',email:'joao@email.com',phone:'(11) 99123-4567',city:'Sao Paulo',state:'SP',orders:['o1','o3','o8'],totalSpent:524.60,createdAt:'2024-08-10'},
   {id:'c2',name:'Maria Produtora',email:'maria@email.com',phone:'(21) 98765-4321',city:'Rio de Janeiro',state:'RJ',orders:['o2','o6'],totalSpent:489.80,createdAt:'2024-09-02'},
@@ -412,6 +420,7 @@ const DEFAULT_ORDERS = [
   {id:'o14',customerId:'c7',customerName:'Roberto Sitio',items:[{productId:'p12',name:'Fio Cerca 500m',qty:1,price:149.90},{productId:'p22',name:'Luva Raspa',qty:2,price:35.90}],subtotal:221.70,shipping:0,total:221.70,status:'enviado',payment:'pix',createdAt:'2024-11-22'},
   {id:'o15',customerId:'c8',customerName:'Fernanda Campo',items:[{productId:'p17',name:'NPK 10-10-10 25kg',qty:2,price:89.90}],subtotal:179.80,shipping:0,total:179.80,status:'pendente',payment:'boleto',createdAt:'2024-11-28'}
 ];
+*/
 
 // ============================================================
 // DB - Google Firebase (Firestore)
@@ -429,18 +438,47 @@ const DB = (function(){
   const eventsCol = function(){ return fire.db? fire.db.collection('agrovel_data').doc('events').collection('items') : null; };
   const _eventsBaseline = {};
 
+  const LOCAL_CACHE_KEY='agrovel_cat_cache';
+  const LOCAL_CACHE_VER=1;
+  const CACHE_TTL=6*60*60*1000;
+  const CRITICAL_KEYS=['categories','users','cart','promos'];
+
+  function saveCache(){
+    try{
+      var data={v:LOCAL_CACHE_VER,ts:Date.now()};
+      CRITICAL_KEYS.forEach(function(k){ data[k]=mem[k]; });
+      data['products']=Array.isArray(mem['products'])?mem['products']:[];
+      if(mem['products_meta']&&typeof mem['products_meta'].total==='number') data['products_meta']=mem['products_meta'];
+      var s=JSON.stringify(data);
+      if(s.length>2*1024*1024) return;
+      localStorage.setItem(LOCAL_CACHE_KEY,s);
+    }catch(e){}
+  }
+  function loadCache(){
+    try{
+      var raw=localStorage.getItem(LOCAL_CACHE_KEY);
+      if(!raw)return false;
+      var c=JSON.parse(raw);
+      if(!c||c.v!==LOCAL_CACHE_VER||Date.now()-c.ts>CACHE_TTL)return false;
+      CRITICAL_KEYS.forEach(function(k){ if(c[k]!==undefined) mem[k]=c[k]; });
+      if(c.products&&c.products.length) mem['products']=c.products;
+      if(c.products_meta&&typeof c.products_meta.total==='number') mem['products_meta']=c.products_meta;
+      return true;
+    }catch(e){return false;}
+  }
+
   function defaultFor(key){
     switch(key){
       // IMPORTANTE: nunca exibir produtos de exemplo como se fossem reais.
       // Se o Firestore nao respondeu/vazio, o catalogo fica vazio.
       case 'products': return [];
-      case 'orders':   return DEFAULT_ORDERS;
-      case 'customers':return DEFAULT_CUSTOMERS;
-      case 'users':    return DEFAULT_USERS;
-      case 'categories':return DEFAULT_CATEGORIES;
+      case 'orders':   return [];
+      case 'customers':return [];
+      case 'users':    return [];
+      case 'categories':return [];
       case 'promos':   return [];
-      case 'events':   return DEFAULT_EVENTS||[];
-      case 'news':     return DEFAULT_NEWS;
+      case 'events':   return [];
+      case 'news':     return [];
       case 'cart':     return [];
       case 'currentUser': return null;
       case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'featured'};
@@ -453,26 +491,45 @@ const DB = (function(){
     try{ return fire.db.collection('agrovel_data').doc(key); }catch(e){ return null; }
   }
 
+  async function _fetchOne(key){
+    try{
+      const ref = docRef(key);
+      if(!ref){ mem[key]=defaultFor(key); return; }
+      const snap = await ref.get();
+      const data = (snap.exists && snap.data()) ? snap.data() : {};
+      if(data.v!==undefined){
+        mem[key] = data.v;
+      } else {
+        mem[key] = defaultFor(key);
+      }
+    }catch(err){
+      console.error('FB load '+key, err);
+      mem[key] = defaultFor(key);
+    }
+  }
+
+  async function loadCritical(){
+    mem['_loading']=true;
+    mem['_loadError']=false;
+    const jobs = CRITICAL_KEYS.map(_fetchOne);
+    jobs.push(loadProducts());
+    jobs.push(loadProductsMeta());
+    await Promise.all(jobs);
+    mem['_loading']=false;
+    saveCache();
+  }
+
+  async function loadBackground(){
+    const jobs = COLL.filter(function(k){return k!=='products'&&k!=='events'&&CRITICAL_KEYS.indexOf(k)===-1;}).map(_fetchOne);
+    jobs.push(loadEvents());
+    await Promise.all(jobs);
+    saveCache();
+  }
+
   async function loadAll(){
     mem['_loading']=true;
     mem['_loadError']=false;
-    const jobs = COLL.filter(function(k){return k!=='products'&&k!=='events'}).map(async function(key){
-      try{
-        const ref = docRef(key);
-        if(!ref){ mem[key]=defaultFor(key); return; }
-        const snap = await ref.get();
-        const data = (snap.exists && snap.data()) ? snap.data() : {};
-        if(data.v!==undefined){
-          mem[key] = data.v;
-        } else {
-          mem[key] = defaultFor(key);
-          await ref.set({v:mem[key]});
-        }
-      }catch(err){
-        console.error('FB load '+key, err);
-        mem[key] = defaultFor(key);
-      }
-    });
+    const jobs = COLL.filter(function(k){return k!=='products'&&k!=='events'}).map(_fetchOne);
     jobs.push(loadProducts());
     jobs.push(loadEvents());
     await Promise.all(jobs);
@@ -560,30 +617,92 @@ const DB = (function(){
   const productsCol = function(){ return fire.db? fire.db.collection('agrovel_data').doc('products').collection('items') : null; };
   const _productsBaseline = {};
   let _productsDirty = false;
-  // Leitura paginada no Firestore: a primeira carga traz poucos produtos
-  // para o catalogo aparecer rapido; o restante continua em segundo plano.
-  const PRODUCTS_FIRST_BATCH = 20;
+  // Leitura paginada no Firestore: a primeira carga traz um lote pequeno
+  // para o catalogo aparecer rapido; o restante carrega em segundo plano,
+  // em blocos, sem travar a tela.
+  const PRODUCTS_FIRST_BATCH = 40;
   const PRODUCTS_PAGE_SIZE = 500;
   let _productsLoadGen = 0;
+  let _productsComplete = false;
+
+  function appendProducts(arr){
+    const cur = Array.isArray(mem['products'])?mem['products']:[];
+    const seen = {};
+    cur.forEach(function(p){ if(p&&p.id) seen[p.id]=1; });
+    const add = [];
+    arr.forEach(function(p){
+      if(!p||!p.id) return;
+      if(seen[p.id]) return;
+      seen[p.id]=1; add.push(p);
+      _productsBaseline[p.id]=JSON.stringify(p);
+    });
+    if(add.length) mem['products'] = cur.concat(add);
+  }
+
+  function recomputeProductsMeta(){
+    const list = Array.isArray(mem['products'])?mem['products']:[];
+    const cats={}, species={};
+    let total=0, active=0;
+    list.forEach(function(p){
+      if(!p) return;
+      total++;
+      if(p.active!==false){
+        active++;
+        if(p.category) cats[p.category]=(cats[p.category]||0)+1;
+        if(p.species) species[p.species]=(species[p.species]||0)+1;
+      }
+    });
+    const m={total:total, active:active, cats:cats, species:species};
+    mem['products_meta']=m;
+    return m;
+  }
+
+  function persistProductsMeta(){
+    try{
+      if(!fire.db) return;
+      const ref = fire.db.collection('agrovel_data').doc('products_meta');
+      const m = recomputeProductsMeta();
+      ref.set({v:m}).catch(function(err){ console.error('FB write products_meta', err); });
+    }catch(e){ console.error('FB write products_meta', e); }
+  }
+
+  async function loadProductsMeta(){
+    try{
+      if(!fire.db) return;
+      const ref = fire.db.collection('agrovel_data').doc('products_meta');
+      const snap = await ref.get();
+      const data = (snap.exists && snap.data()) ? snap.data() : {};
+      if(data && data.v && typeof data.v.total==='number'){
+        mem['products_meta'] = data.v;
+      }
+    }catch(e){ console.error('FB load products_meta', e); }
+  }
 
   async function _loadProductPages(col, firstDocs, firstLimit, gen){
     try{
       var last = firstDocs[firstDocs.length-1];
-      var pageCount = firstDocs.length;
-      var limit = firstLimit;
-      while(pageCount===limit){
-        if(_productsLoadGen!==gen) return;
-        limit = PRODUCTS_PAGE_SIZE;
-        const q = col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit);
-        const snap = await q.get();
-        if(_productsLoadGen!==gen) return;
-        if(snap.empty) break;
-        const arr = snap.docs.map(function(d){return d.data()});
-        arr.forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
-        mem['products'] = mem['products'].concat(arr);
-        pageCount = snap.size;
-        last = snap.docs[snap.docs.length-1];
-        try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+      if(last){
+        var pageCount = firstDocs.length;
+        var limit = firstLimit;
+        while(pageCount===limit){
+          if(_productsLoadGen!==gen) return;
+          limit = PRODUCTS_PAGE_SIZE;
+          const q = col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit);
+          const snap = await q.get();
+          if(_productsLoadGen!==gen) return;
+          if(snap.empty) break;
+          appendProducts(snap.docs.map(function(d){return d.data()}));
+          pageCount = snap.size;
+          last = snap.docs[snap.docs.length-1];
+          try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+        }
+      }
+      if(_productsLoadGen===gen){
+        _productsComplete=true;
+        recomputeProductsMeta();
+        persistProductsMeta();
+        saveCache();
+        try{ if(typeof notifyProductsFullyLoaded==='function') notifyProductsFullyLoaded(); }catch(e){}
       }
     }catch(e){
       console.error('FB load products pages', e);
@@ -591,9 +710,42 @@ const DB = (function(){
     }
   }
 
+  async function _reconcileLegacy(col, gen){
+    try{
+      if(!fire.db) return;
+      const ref = fire.db.collection('agrovel_data').doc('products');
+      const s = await ref.get();
+      if(!s.exists) return;
+      const data = s.data()||{};
+      if(!Array.isArray(data.v)||!data.v.length) return;
+      const have = {};
+      Array.isArray(mem['products'])&&mem['products'].forEach(function(p){ if(p&&p.id) have[p.id]=1; });
+      const extra = data.v.filter(function(p){ return p&&p.id&&!have[p.id]; });
+      if(!extra.length){
+        try{ await ref.delete(); }catch(e){}
+        return;
+      }
+      appendProducts(extra);
+      clearProductsError();
+      let i;
+      for(i=0;i<extra.length;i+=450){
+        const batch = fire.db.batch();
+        extra.slice(i,i+450).forEach(function(p){ batch.set(col.doc(p.id), p); });
+        await batch.commit();
+      }
+      try{ await ref.delete(); }catch(e){}
+      if(_productsLoadGen===gen){
+        recomputeProductsMeta();
+        saveCache();
+        try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+      }
+    }catch(e){ console.error('FB reconcile legacy', e); }
+  }
+
   async function loadProducts(){
     if(!fire.db){ mem['products']=defaultFor('products'); return; }
     const gen = ++_productsLoadGen;
+    _productsComplete=false;
     try{
       const col = productsCol();
       const first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
@@ -604,6 +756,7 @@ const DB = (function(){
         mem['products'].forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
         clearProductsError();
         _loadProductPages(col, first.docs, PRODUCTS_FIRST_BATCH, gen);
+        _reconcileLegacy(col, gen);
         return;
       }
     }catch(e){ console.error('FB load products sub', e); }
@@ -616,17 +769,25 @@ const DB = (function(){
         Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
         data.v.forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
         const col = productsCol();
-        const batch = fire.db.batch();
-        data.v.forEach(function(p){ if(p&&p.id) batch.set(col.doc(p.id), p); });
-        await batch.commit();
+        let i;
+        for(i=0;i<data.v.length;i+=450){
+          const batch = fire.db.batch();
+          data.v.slice(i,i+450).forEach(function(p){ if(p&&p.id) batch.set(col.doc(p.id), p); });
+          await batch.commit();
+        }
         try{ await ref.delete(); }catch(e){ console.error('FB migrate legacy removed', e); }
+        _productsComplete=true;
+        recomputeProductsMeta();
+        persistProductsMeta();
         clearProductsError();
         return;
       }
     }catch(e){ console.error('FB load products legacy', e); }
     // Nunca exibir produtos de exemplo (DEFAULT_PRODUCTS) no catalogo.
     // Se o Firestore nao respondeu, fica vazio + indicador de erro p/ retry.
-    mem['products'] = defaultFor('products');
+    if(!(Array.isArray(mem['products'])&&mem['products'].length)){
+      mem['products'] = defaultFor('products');
+    }
     mem['_loadError']='products';
   }
 
@@ -662,6 +823,8 @@ const DB = (function(){
         }
         deletes.forEach(function(id){ delete _productsBaseline[id]; });
       }
+      _productsComplete=true;
+      persistProductsMeta();
     }catch(err){
       console.error('FB write products', err);
       _productsDirty = true;
@@ -694,6 +857,9 @@ const DB = (function(){
     mem: mem,
     _setFire:function(db){ fire.db=db; },
     _loadAll: loadAll,
+    _loadCritical: function(){ return loadCritical(); },
+    _loadBackground: function(){ return loadBackground(); },
+    _loadCache: function(){ return loadCache(); },
     _flushAll: flushAll,
     _clearEventsMemo:function(){
       if(timers['events']) clearTimeout(timers['events']);
@@ -707,12 +873,18 @@ const DB = (function(){
     s(key,val){ mem[key]=val; persist(key); return true; },
 
     products(){return this.g('products')||[]},
+    productsMeta(){
+      const m=mem['products_meta'];
+      if(m&&typeof m.total==='number') return m;
+      return recomputeProductsMeta();
+    },
+    productsComplete(){ return !!_productsComplete; },
     setProducts(v){ mem['products']=v; markProductsDirty(); return true; },
-    orders(){return this.g('orders')||DEFAULT_ORDERS},
+    orders(){return this.g('orders')||[]},
     setOrders(v){ mem['orders']=v; persist('orders'); return true; },
-    customers(){return this.g('customers')||DEFAULT_CUSTOMERS},
+    customers(){return this.g('customers')||[]},
     setCustomers(v){ mem['customers']=v; persist('customers'); return true; },
-    users(){return this.g('users')||DEFAULT_USERS},
+    users(){return this.g('users')||[]},
     setUsers(v){ mem['users']=v; persist('users'); return true; },
     cart(){return this.g('cart')||[]},
     setCart(v){ mem['cart']=v; persist('cart'); return true; },
@@ -745,9 +917,9 @@ const DB = (function(){
     },
     promos(){return this.g('promos')||[]},
     setPromos(v){ mem['promos']=v; persist('promos'); return true; },
-    events(){return this.g('events')||DEFAULT_EVENTS},
+    events(){return this.g('events')||[]},
     setEvents(v){ mem['events']=v; persist('events'); return true; },
-    news(){return this.g('news')||DEFAULT_NEWS},
+    news(){return this.g('news')||[]},
     setNews(v){ mem['news']=v; persist('news'); return true; },
     categories(){return this.g('categories')},
     setCategories(v){ mem['categories']=v; persist('categories'); return true; },
@@ -1161,6 +1333,32 @@ function resetCatalogPagination(){
   catalogVisibleCount=CATALOG_PAGE_SIZE;
 }
 
+function catalogUsingAnyFilter(){
+  const f=DB.filters();
+  return !!(f.category||f.search||f.species||f.brand);
+}
+function catCount(products,c){
+  if(!catalogUsingAnyFilter()){
+    const meta=DB.productsMeta();
+    return (meta.cats&&meta.cats[c])||0;
+  }
+  return products.filter(function(p){return p.category===c}).length;
+}
+function speciesCount(products,s){
+  if(!catalogUsingAnyFilter()){
+    const meta=DB.productsMeta();
+    return (meta.species&&meta.species[s])||0;
+  }
+  return products.filter(function(p){return p.species===s}).length;
+}
+function resultCount(filtered){
+  if(!catalogUsingAnyFilter()){
+    const meta=DB.productsMeta();
+    return (typeof meta.active==='number')?meta.active:filtered.length;
+  }
+  return filtered.length;
+}
+
 function getFilteredProducts(){
   const filters=DB.filters();
   const products=DB.products().filter(function(p){return p.active});
@@ -1223,15 +1421,33 @@ function loadMoreProducts(){
 
 var _productsGrewPending=false;
 function notifyProductsGrew(){
-  if(State.view!=='catalog') return;
-  if(_productsGrewPending) return;
-  _productsGrewPending=true;
-  setTimeout(function(){
-    _productsGrewPending=false;
-    if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
-      updateCatalogResults(true);
-    }
-  },0);
+  if(State.view==='catalog'){
+    if(_productsGrewPending) return;
+    _productsGrewPending=true;
+    setTimeout(function(){
+      _productsGrewPending=false;
+      if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
+        updateCatalogResults(true);
+      }
+    },0);
+    return;
+  }
+  if(State.view==='admin'){
+    if(_productsGrewPending) return;
+    _productsGrewPending=true;
+    setTimeout(function(){
+      _productsGrewPending=false;
+      if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='copilot')){
+        try{ renderAdminSection(); }catch(e){}
+      }
+    },0);
+  }
+}
+function notifyProductsFullyLoaded(){
+  if(State.view==='catalog'&&document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+  else if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='copilot')){
+    try{ renderAdminSection(); }catch(e){}
+  }
 }
 
 function renderCatalog(){
@@ -1245,7 +1461,7 @@ function renderCatalog(){
   const featured=products.filter(function(p){return p.featured}).slice(0,5);
 
   return'<div class="fade-in">'+
-  (DB.loadError()?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
+  (DB.loadError()&&!products.length?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
     '<div class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">'+
       '<div class="flex-1"><strong><i class="fas fa-exclamation-triangle mr-1"></i> Ca&aacute;logo temporariamente indispon&iacute;vel.</strong> N&atilde;o foi poss&iacute;vel carregar os produtos cadastrados. Verifique sua conex&atilde;o e tente novamente.</div>'+
       '<button id="catalog-retry-btn" onclick="retryCatalogLoad()" class="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded-xl transition-colors">Tentar novamente</button>'+
@@ -1284,10 +1500,10 @@ function renderCatalog(){
           '<div class="mb-5">'+
             '<p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Categoria</p>'+
             '<div class="space-y-1.5">'+
-              getCategories().filter(function(c){return filters.category===c||products.filter(function(p){return p.category===c}).length>0}).map(function(c){return '<button onclick="toggleCategory(\''+c+'\')" '+
+              getCategories().filter(function(c){return filters.category===c||catCount(products,c)>0}).map(function(c){return '<button onclick="toggleCategory(\''+c+'\')" '+
                 'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.category===c?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
                 '<i class="fas '+(iconForCat(c))+' mr-2 text-green-400"></i>'+c+
-                ' <span class="float-right text-xs text-gray-400">'+products.filter(function(p){return p.category===c}).length+'</span>'+
+                ' <span class="float-right text-xs text-gray-400">'+catCount(products,c)+'</span>'+
               '</button>'}).join('')+
             '</div>'+
           '</div>'+
@@ -1297,7 +1513,7 @@ function renderCatalog(){
               allSpecies.map(function(s){return '<button onclick="toggleSpecies(\''+s+'\')" '+
                 'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.species===s?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
                 '<i class="fas fa-paw mr-2 text-green-400"></i>'+s+
-                ' <span class="float-right text-xs text-gray-400">'+products.filter(function(p){return p.species===s}).length+'</span>'+
+                ' <span class="float-right text-xs text-gray-400">'+speciesCount(products,s)+'</span>'+
               '</button>'}).join('')+
             '</div>'+
           '</div>':'')+
@@ -1320,7 +1536,7 @@ function renderCatalog(){
           (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
         '</div>':'')+
 
-        '<p class="text-sm text-gray-500 mb-5"><strong class="text-gray-800">'+filtered.length+'</strong> produto'+(filtered.length!==1?'s':'')+' encontrado'+(filtered.length!==1?'s':'')+'</p>'+
+        '<p class="text-sm text-gray-500 mb-5"><strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')+'</p>'+
 
         (filtered.length===0?'<div class="text-center py-20">'+
           '<div class="text-6xl mb-4">🔍</div>'+
@@ -1377,7 +1593,7 @@ function updateCatalogResults(keepPage){
     (filters.species?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-paw text-xs"></i>'+filters.species+'<button onclick="toggleSpecies(\''+filters.species+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
     (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
   '</div>':'')+
-  '<p class="text-sm text-gray-500 mb-5"><strong class="text-gray-800">'+filtered.length+'</strong> produto'+(filtered.length!==1?'s':'')+' encontrado'+(filtered.length!==1?'s':'')+'</p>'+
+  '<p class="text-sm text-gray-500 mb-5"><strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')+'</p>'+
   (filtered.length===0?'<div class="text-center py-20">'+
     '<div class="text-6xl mb-4">🔍</div>'+
     '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
@@ -2735,8 +2951,24 @@ function exportAnalytics(){
   }catch(e){ showToast('Falha ao exportar dados','error'); }
 }
 
+var _chartJSPromise=null;
+function ensureChartJS(){
+  if(typeof Chart!=='undefined') return Promise.resolve();
+  if(!_chartJSPromise){
+    _chartJSPromise=new Promise(function(resolve,reject){
+      var s=document.createElement('script');
+      s.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js';
+      s.onload=function(){resolve();};
+      s.onerror=function(){reject(new Error('Chart.js load failed'));};
+      document.head.appendChild(s);
+    });
+  }
+  return _chartJSPromise;
+}
+
 function initDashboardCharts(){
   if(!_dbData)return;
+  ensureChartJS().then(function(){
   var DBG=_dbData;
   var PAL=['#059669','#f59e0b','#3b82f6','#8b5cf6','#10b981','#ef4444','#14b8a6','#ec4899'];
 
@@ -2794,6 +3026,7 @@ function initDashboardCharts(){
     var cl=DBG.topCats.slice(0,8).reverse();
     new Chart(c6,{type:'bar',data:{labels:cl.map(function(r){return r[0]}),datasets:[{data:cl.map(function(r){return r[1]}),backgroundColor:'rgba(5,150,105,0.65)',borderRadius:5}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,ticks:{precision:0}},x:{ticks:{maxTicksLimit:8,font:{size:9},autoSkip:true}}}}});
   }
+  }).catch(function(e){console.error('Chart.js dashboard',e)});
 }
 
 // ============================================================
@@ -2805,7 +3038,7 @@ function renderAdminProducts(){
   const canEdit=u.role==='admin'||u.role==='seller';
   return'<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
-      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Produtos</h1><p class="text-gray-400 text-sm">'+products.length+' produtos cadastrados</p></div>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Produtos</h1><p class="text-gray-400 text-sm">'+DB.productsMeta().total+(DB.productsComplete()?'':' + carregando')+' produtos cadastrados</p></div>'+
       (u.role==='admin'?'<button onclick="startProductForm(null)" class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors flex items-center gap-2 text-sm"><i class="fas fa-plus"></i>Novo Produto</button>':'')+
     '</div>'+
     '<div class="flex flex-col sm:flex-row gap-3 mb-5">'+
@@ -3450,10 +3683,13 @@ function promoOverlayHtml(p){
   h+='</div>';
   return h;
 }
+var _promoAutoShown=false;
 function showPromoPopup(){
   var promos=DB.promos();
   var active=promos.find(function(x){return x.active});
   if(!active) return;
+  if(_promoAutoShown) return;
+  _promoAutoShown=true;
   trackEvent('promo_view',{title:active.title});
   var existing=document.getElementById('promo-popup');
   if(existing)existing.remove();
@@ -4650,6 +4886,7 @@ function refreshInsights(){
 }
 
 function initCopilotChart(){
+  ensureChartJS().then(function(){
   const orders=DB.orders();
   const months=['Jul','Ago','Set','Out','Nov','Dez'];
   const monthRevenues=[7,8,9,10,11,12].map(function(m){
@@ -4664,6 +4901,7 @@ function initCopilotChart(){
   })});
   const ctx2=document.getElementById('cat-chart');
   if(ctx2) new Chart(ctx2,{type:'pie',data:{labels:Object.keys(catRev),datasets:[{data:Object.values(catRev),backgroundColor:['#f59e0b','#10b981','#3b82f6','#8b5cf6','#f97316','#ef4444','#ec4899','#14b8a6'],borderWidth:0}]},options:{responsive:true,plugins:{legend:{position:'bottom',labels:{font:{size:11},padding:8}}}}});
+  }).catch(function(e){console.error('Chart.js copilot',e)});
 }
 
 // ============================================================
@@ -4866,7 +5104,7 @@ async function retryCatalogLoad(){
     const db=firebase.firestore();
     DB._setFire(db);
     DB.setLoading(true);
-    var r=await timeoutRace(DB._loadAll(),15000,'retry loadAll');
+    var r=await timeoutRace(DB._loadCritical(),10000,'retry loadCritical');
     if(r.timedOut){ DB._markLoadError('timeout'); }
     DB.setLoading(false);
   }catch(e){
@@ -4877,6 +5115,7 @@ async function retryCatalogLoad(){
   if(State.view==='catalog'||State.view==='admin') render();
   else navigate('catalog');
   if(btn) btn.disabled=false;
+  DB._loadBackground().catch(function(){});
 }
 
 // ============================================================
@@ -4884,28 +5123,66 @@ async function retryCatalogLoad(){
 // ============================================================
 window.addEventListener('DOMContentLoaded', async function(){
   var mc=document.getElementById('main-content');
-  if(mc) mc.innerHTML=loadingSplash();
-  try{
-    ensureFirebaseApp();
-    const db = firebase.firestore();
-    DB._setFire(db);
-    DB.setLoading(true);
-    var r=await timeoutRace(DB._loadAll(),12000,'loadAll');
-    if(r.timedOut){ DB._markLoadError('timeout'); }
-    DB.setLoading(false);
-    initAuth();
-  }catch(e){
-    console.error('Firebase init error', e);
-    DB._markLoadError('init');
-    DB.setLoading(false);
-    setTimeout(function(){showToast('Erro ao conectar ao Firebase. Verifique sua conexao/internet.','error')},10);
+  var useCache=DB._loadCache();
+
+  function renderInitial(){
+    var sp=location.hash.replace(/^#/,'');
+    if(sp.indexOf('post=')===0)navigate('blog-post',{newsId:decodeURIComponent(sp.slice(5))});
+    else navigate('catalog');
+    renderCartSidebar();
+    renderCategoryNavs();
   }
-var sp=location.hash.replace(/^#/,'');
-  if(sp.indexOf('post=')===0)navigate('blog-post',{newsId:decodeURIComponent(sp.slice(5))});
-  else navigate('catalog');
-  renderCartSidebar();
-  renderCategoryNavs();
+  function refreshData(showToastOnError){
+    return timeoutRace(DB._loadCritical(),10000,'loadCritical').then(function(r){
+      DB.setLoading(false);
+      if(r&&r.timedOut){ DB._markLoadError('timeout'); }
+      if(State.view==='catalog'){
+        if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+      }else if(State.view==='blog'||State.view==='blog-post'){
+        render();
+      }
+      return r;
+    }).catch(function(e){
+      console.error('Firebase init error', e);
+      DB._markLoadError('init');
+      DB.setLoading(false);
+      if(showToastOnError) setTimeout(function(){showToast('Erro ao conectar ao Firebase. Verifique sua conexao/internet.','error')},10);
+    });
+  }
+
+  if(useCache){
+    renderInitial(); // catalogo fica navegavel imediatamente a partir do cache
+    try{
+      ensureFirebaseApp();
+      DB._setFire(firebase.firestore());
+      DB.setLoading(true);
+      refreshData(false); // atualiza em background, sem travar a navegacao
+    }catch(e){
+      console.error('Firebase init error', e);
+      DB._markLoadError('init');
+      DB.setLoading(false);
+    }
+  }else{
+    if(mc) mc.innerHTML=loadingSplash();
+    try{
+      ensureFirebaseApp();
+      DB._setFire(firebase.firestore());
+      DB.setLoading(true);
+      await refreshData(true);
+    }catch(e){
+      console.error('Firebase init error', e);
+      DB._markLoadError('init');
+      DB.setLoading(false);
+    }
+    renderInitial();
+  }
+  initAuth();
   setTimeout(function(){showPromoPopup();},600);
+  DB._loadBackground().then(function(){
+    renderCategoryNavs();
+    if(State.view==='blog'||State.view==='blog-post'||State.view==='admin') render();
+    setTimeout(function(){showPromoPopup();},200);
+  }).catch(function(){});
 });
 </script>
 </body>
