@@ -7,13 +7,17 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="theme-color" content="#14532d">
 <title>Agrovel — Mais que Produtos, Soluções</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
-<script src="firebase-config.js"></script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"></noscript>
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firebasestorage.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js" defer></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js" defer></script>
+<script src="firebase-config.js" defer></script>
 <style>
   body{font-family:system-ui,-apple-system,sans-serif;background:#f0fdf4}
   .fade-in{animation:fadeIn .25s ease forwards}
@@ -181,7 +185,7 @@
             <i class="fas fa-bars"></i>
           </button>
           <button onclick="navigate('catalog')" class="flex items-center gap-3 transition-all duration-300 hover:scale-105 p-2 rounded-2xl hover:bg-white/10">
-            <img src="img/logo.gif" alt="Agrovel" class="h-24 md:h-32 w-auto logo-glow">
+            <img src="img/logo.gif" alt="Agrovel" class="h-24 md:h-32 w-auto logo-glow" width="128" height="128" fetchpriority="high">
           </button>
         </div>
         <nav class="hidden md:flex items-center gap-6 text-sm">
@@ -215,7 +219,7 @@
   <footer id="public-footer" class="bg-green-900 text-green-200 mt-16">
     <div class="max-w-7xl mx-auto px-4 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
       <div>
-        <img src="img/logo.gif" alt="Agrovel" class="h-10 w-auto mb-3">
+        <img src="img/logo.gif" alt="Agrovel" class="h-10 w-auto mb-3" width="40" height="40" loading="lazy">
         <p class="text-sm leading-relaxed"><strong class="text-white">Mais que Produtos, Soluções.</strong> Soluções inteligentes e completas para o seu campo e seus animais. Medicamentos, nutrição e tecnologia com garantia de procedência e padrão ouro de qualidade.</p>
       </div>
       <div>
@@ -5229,6 +5233,9 @@ async function retryCatalogLoad(){
 // INIT
 // ============================================================
 window.addEventListener('DOMContentLoaded', async function(){
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('/sw.js').catch(function(){});
+  }
   var mc=document.getElementById('main-content');
   var useCache=DB._loadCache();
 
