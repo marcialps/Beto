@@ -8,16 +8,17 @@
 <meta name="theme-color" content="#14532d">
 <title>Agrovel — Mais que Produtos, Soluções</title>
 <link rel="stylesheet" href="css/style.css">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" media="print" onload="this.media='all'">
-<noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css"></noscript>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" crossorigin="anonymous"></noscript>
 <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://firebasestorage.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js" defer></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js" defer></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js" defer></script>
 <script src="firebase-config.js" defer></script>
+<script src="admin-config.js" defer></script>
 <style>
   body{font-family:system-ui,-apple-system,sans-serif;background:#f0fdf4}
   .fade-in{animation:fadeIn .25s ease forwards}
@@ -203,7 +204,7 @@
         </div>
       </div>
       <div id="mobile-menu" class="md:hidden">
-        <button onclick="navigate('blog')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-1 mobile-highlight"><i class="fas fa-newspaper mr-2 text-green-400"></i>AGROVELinforma</button>
+        <button onclick="navigate('blog')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-1 mobile-highlight"><i class="fas fa-newspaper mr-2 text-green-400"></i>AGROVEL Informa</button>
         <button onclick="navigate('about')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-1 mobile-highlight"><i class="fas fa-info-circle mr-2 text-green-400"></i>Sobre</button>
         <button onclick="navigate('catalog')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-2 mobile-highlight"><i class="fas fa-store mr-2 text-green-400"></i>Catalogo</button>
         <div class="border-t border-green-800 my-1"></div>
@@ -229,7 +230,7 @@
       <div>
         <div class="text-white font-semibold mb-3">Informações</div>
         <ul class="space-y-1 text-sm">
-          <li><button onclick="navigate('blog')" class="hover:text-white"><i class="fas fa-newspaper mr-2"></i>AGROVELinforma</button></li>
+          <li><button onclick="navigate('blog')" class="hover:text-white"><i class="fas fa-newspaper mr-2"></i>AGROVEL Informa</button></li>
           <li><button onclick="navigate('about')" class="hover:text-white"><i class="fas fa-info-circle mr-2"></i>Sobre a Agrovel</button></li>
           <li>Frete a negociar</li>
           <li>Mais de 12.000 produtos</li>
@@ -389,11 +390,7 @@ const DEFAULT_NEWS = [
     tags:['pastagem','manejo','primavera'],cover:'https://picsum.photos/seed/agrovel-pastagem/1200/630',video:null,author:'Equipe Agrovel',featured:false,active:true,views:73,createdAt:'2026-07-15T10:00:00'}
 ];
 
-const DEFAULT_USERS = [
-  {id:'u1',name:'Administrador',email:'beto@agrovel.com',password:'admin123',role:'admin',avatar:'AD'},
-  //{id:'u2',name:'Vendedor',email:'vendedor@agrovet.com',password:'vend123',role:'seller',avatar:'VE'},
-  //{id:'u3',name:'Convidado',email:'convidado@agrovet.com',password:'conv123',role:'guest',avatar:'CO'}
-];
+// DEFAULT_USERS carregado de admin-config.js
 
 /*
 const DEFAULT_CUSTOMERS = [
@@ -435,7 +432,7 @@ const DEFAULT_ORDERS = [
 const DB = (function(){
   const mem = {};                       // cache em memoria (espelho)
   const fire = { db: null };            // instancia do Firestore
-  const COLL = ['products','orders','customers','users','categories','promos','events','cart','news'];
+  const COLL = ['products','orders','customers','users','categories','promos','events','cart','news','highlights'];
   const pending = {};
   const timers = {};
 
@@ -443,9 +440,11 @@ const DB = (function(){
   const _eventsBaseline = {};
 
   const LOCAL_CACHE_KEY='agrovel_cat_cache';
-  const LOCAL_CACHE_VER=1;
-  const CACHE_TTL=6*60*60*1000;
-  const CRITICAL_KEYS=['categories','users','cart','promos'];
+  const LOCAL_CACHE_VER=2;
+  // Revalidacao em background a cada visita. Dados antigos sao sempre usados
+  // como fallback instantaneo (inacessibilidade/lentidao nunca "apagam" o catalogo).
+  const CACHE_TTL=24*60*60*1000;
+  const CRITICAL_KEYS=['categories','users','cart','promos','highlights'];
 
   function saveCache(){
     try{
@@ -454,7 +453,7 @@ const DB = (function(){
       data['products']=Array.isArray(mem['products'])?mem['products']:[];
       if(mem['products_meta']&&typeof mem['products_meta'].total==='number') data['products_meta']=mem['products_meta'];
       var s=JSON.stringify(data);
-      if(s.length>2*1024*1024) return;
+      if(s.length>5*1024*1024) return;
       localStorage.setItem(LOCAL_CACHE_KEY,s);
     }catch(e){}
   }
@@ -463,7 +462,9 @@ const DB = (function(){
       var raw=localStorage.getItem(LOCAL_CACHE_KEY);
       if(!raw)return false;
       var c=JSON.parse(raw);
-      if(!c||c.v!==LOCAL_CACHE_VER||Date.now()-c.ts>CACHE_TTL)return false;
+      if(!c||c.v!==LOCAL_CACHE_VER)return false;
+      // Nao descarta cache antigo: dados obsoletos servem de fallback instantaneo
+      // enquanto a atualizacao acontece em segundo plano via refreshData().
       CRITICAL_KEYS.forEach(function(k){ if(c[k]!==undefined) mem[k]=c[k]; });
       if(c.products&&c.products.length) mem['products']=c.products;
       if(c.products_meta&&typeof c.products_meta.total==='number') mem['products_meta']=c.products_meta;
@@ -483,6 +484,7 @@ const DB = (function(){
       case 'promos':   return [];
       case 'events':   return [];
       case 'news':     return [];
+      case 'highlights':return [];
       case 'cart':     return [];
       case 'currentUser': return null;
       case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'featured'};
@@ -520,6 +522,7 @@ const DB = (function(){
     jobs.push(loadProductsMeta());
     await Promise.all(jobs);
     mem['_loading']=false;
+    mem['_productsReady']=true;
     saveCache();
   }
 
@@ -527,6 +530,7 @@ const DB = (function(){
     const jobs = COLL.filter(function(k){return k!=='products'&&k!=='events'&&CRITICAL_KEYS.indexOf(k)===-1;}).map(_fetchOne);
     jobs.push(loadEvents());
     await Promise.all(jobs);
+    mem['_newsReady']=true;
     saveCache();
   }
 
@@ -538,6 +542,8 @@ const DB = (function(){
     jobs.push(loadEvents());
     await Promise.all(jobs);
     mem['_loading']=false;
+    mem['_productsReady']=true;
+    mem['_newsReady']=true;
   }
 
   function clearProductsError(){
@@ -624,7 +630,7 @@ const DB = (function(){
   // Leitura paginada no Firestore: a primeira carga traz um lote pequeno
   // para o catalogo aparecer rapido; o restante carrega em segundo plano,
   // em blocos, sem travar a tela.
-  const PRODUCTS_FIRST_BATCH = 40;
+  const PRODUCTS_FIRST_BATCH = 22;
   const PRODUCTS_PAGE_SIZE = 500;
   let _productsLoadGen = 0;
   let _productsComplete = false;
@@ -921,6 +927,8 @@ const DB = (function(){
     },
     promos(){return this.g('promos')||[]},
     setPromos(v){ mem['promos']=v; persist('promos'); return true; },
+    highlights(){return this.g('highlights')||[]},
+    setHighlights(v){ mem['highlights']=v; persist('highlights'); return true; },
     events(){return this.g('events')||[]},
     setEvents(v){ mem['events']=v; persist('events'); return true; },
     news(){return this.g('news')||[]},
@@ -928,9 +936,12 @@ const DB = (function(){
     categories(){return this.g('categories')},
     setCategories(v){ mem['categories']=v; persist('categories'); return true; },
     _markLoadError:function(v){ mem['_loadError']=v||true; return true; },
+    _clearLoadError:function(){ mem['_loadError']=false; return true; },
     loadError:function(){ return mem['_loadError']?true:false; },
     isLoading:function(){ return mem['_loading']?true:false; },
     setLoading:function(v){ mem['_loading']=!!v; return true; },
+    productsReady:function(){ return mem['_productsReady']?true:false; },
+    newsReady:function(){ return mem['_newsReady']?true:false; },
   };
 })();
 
@@ -1018,6 +1029,7 @@ let State = {
   editingCategory:null,
   copilotTab:'desc',
   editingPromo:null,
+  editingHighlight:null,
   newsId:null,
   editNewsId:null,
   blogCategory:'',
@@ -1055,7 +1067,7 @@ function renderCategoryNavs(){
   var cats=getCategories();
   var hdr=document.getElementById('header-cat-nav');
   if(hdr) hdr.innerHTML='<div class="flex items-center gap-5">'+
-    '<button onclick="navigate(\'blog\')" class="hover:text-green-300 transition-colors"><i class="fas fa-newspaper mr-1.5 text-green-400"></i>AGROVELinforma</button>'+
+    '<button onclick="navigate(\'blog\')" class="hover:text-green-300 transition-colors"><i class="fas fa-newspaper mr-1.5 text-green-400"></i>AGROVEL Informa</button>'+
     '<button onclick="navigate(\'about\')" class="hover:text-green-300 transition-colors"><i class="fas fa-info-circle mr-1.5 text-green-400"></i>Sobre</button>'+
   '</div>';
   var ftr=document.getElementById('footer-cat-list');
@@ -1299,7 +1311,8 @@ function imgFrame(src,p,i,opts){
   var mainCls=useCover?'img-cover':'img-contain';
   var extra=opts.extra||'';
   if(opts.hover) extra+=' group-hover:scale-105 transition-transform duration-500';
-  return '<img src="'+src+'" alt="'+(opts.alt||'')+'" '+(opts.lazy?'loading="lazy" ':'')+'style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
+  var fp=opts.fp?' fetchpriority="'+opts.fp+'"':'';
+  return '<img src="'+src+'" decoding="async"'+fp+' alt="'+(opts.alt||'')+'" '+(opts.lazy?'loading="lazy" ':'')+'style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
 }
 
 function thumbImg(src,p,i,alt){
@@ -1318,41 +1331,74 @@ function cartImg(item){
   return '<img src="'+src+'" alt="" style="'+style+'" class="'+cls+'">';
 }
 
+function getCarouselHighlights(){
+  var products=DB.products().filter(function(p){return p&&p.active&&p.featured}).slice(0,5);
+  var camps=(DB.highlights()||[]).filter(function(h){return h&&h.active});
+  var items=products.map(function(p){return{type:'product',p:p}});
+  camps.forEach(function(c){items.push({type:'campaign',c:c})});
+  return items;
+}
+
+function carouselSlideForItem(item,i,total){
+  if(item&&item.type==='campaign'){
+    var c=item.c||{};
+    var img=c.image;
+    return'<div class="carousel-slide" data-slide="'+i+'">'+
+      '<div class="carousel-slide-inner cursor-pointer group" onclick="navigate(\'catalog\')">'+
+        '<div class="relative h-[480px] md:h-[520px] overflow-hidden rounded-3xl shadow-2xl bg-white">'+
+          (img?(String(img).indexOf('idb:')===0
+            ?'<img data-idb="'+img+'" decoding="async" alt="'+(c.title||'')+'" '+(i===0?'':'loading="lazy" ')+'class="img-contain" style="padding:5%">'
+            :'<img src="'+img+'" decoding="async" alt="'+(c.title||'')+'" '+(i===0?'':'loading="lazy" ')+'class="img-contain" style="padding:5%">')
+            :'<div class="w-full h-full flex items-center justify-center bg-gradient-to-br from-green-900 via-green-800 to-emerald-900"><div class="text-6xl text-amber-400/80"><i class="fas fa-star"></i></div></div>')+
+          '<div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/10"></div>'+
+          '<div class="absolute inset-x-0 bottom-0 p-7 md:p-10">'+
+            '<div class="flex flex-wrap items-center gap-2 mb-3">'+
+              '<span class="carousel-fade-badge inline-flex items-center gap-1.5 bg-amber-500/95 text-green-950 text-xs font-bold px-3 py-1.5 rounded-full shadow-lg"><i class="fas fa-bullhorn"></i> Campanha '+(i+1)+'/'+total+'</span>'+
+            '</div>'+
+            (c.title?'<h2 class="carousel-fade-title text-2xl md:text-4xl lg:text-5xl font-bold text-white mb-2 md:mb-3 leading-tight drop-shadow">'+c.title+'</h2>':'')+
+            (c.text?'<p class="carousel-fade-copy text-white/80 text-sm md:text-base lg:text-lg mb-3 md:mb-5 max-w-xl leading-relaxed">'+c.text+'</p>':'')+
+            '<span class="inline-flex items-center gap-2 bg-white text-green-900 text-xs md:text-sm font-bold px-4 md:px-5 py-2 md:py-2.5 rounded-xl shadow-lg"><i class="fas fa-store"></i> Conhe\u00e7a a Agrovel</span>'+
+          '</div>'+
+        '</div>'+
+      '</div>'+
+    '</div>';
+  }
+  var p=item.p||item;
+  var price=featFormatPrice(p.price);
+  var oldPrice=p.oldPrice?featFormatPrice(p.oldPrice):'';
+  var discount=(p.oldPrice&&p.oldPrice>p.price)?Math.round((1-p.price/p.oldPrice)*100):0;
+  return'<div class="carousel-slide" data-slide="'+i+'">'+
+    '<div class="carousel-slide-inner cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
+      '<div class="relative h-[480px] md:h-[520px] overflow-hidden rounded-3xl shadow-2xl bg-white">'+
+        imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'4%',fp:(i===0?'high':'low')})+
+        '<div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/10"></div>'+
+        '<div class="absolute inset-x-0 bottom-0 p-7 md:p-10">'+
+          '<div class="flex flex-wrap items-center gap-2 mb-3">'+
+            '<span class="carousel-fade-badge inline-flex items-center gap-1.5 bg-amber-500/95 text-green-950 text-xs font-bold px-3 py-1.5 rounded-full shadow-lg"><i class="fas fa-star"></i> Destaque '+(i+1)+'/'+total+'</span>'+
+            '<span class="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-white/25">'+p.category+'</span>'+
+            (p.brand?'<span class="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-white/25">'+p.brand+'</span>':'')+
+          '</div>'+
+          '<h2 class="carousel-fade-title text-2xl md:text-4xl lg:text-5xl font-bold text-white mb-2 md:mb-3 leading-tight drop-shadow">'+p.name+'</h2>'+
+          '<p class="carousel-fade-copy text-white/80 text-sm md:text-base lg:text-lg mb-3 md:mb-5 max-w-xl leading-relaxed">'+(p.description||'Produto de alta qualidade para o campo e seus animais.')+'</p>'+
+          '<span class="inline-flex items-center gap-2 bg-white text-green-900 text-xs md:text-sm font-bold px-4 md:px-5 py-2 md:py-2.5 rounded-xl shadow-lg transition-transform group-hover:scale-105"><i class="fas fa-shopping-bag"></i> Ver Produto</span>'+
+        '</div>'+
+      '</div>'+
+    '</div>'+
+  '</div>';
+}
+
 function renderFeaturedCarousel(featured){
   featCarouselIndex=0;
   featCarouselLength=featured.length;
   if(!featured.length){
     return'<section class="relative bg-gradient-to-br from-green-900 via-green-800 to-emerald-900 text-white overflow-hidden">'+
-      '<div class="absolute inset-0 opacity-10" style="background-image:url(\'https://picsum.photos/seed/agro-hero/1200/600\');background-size:cover"></div>'+
       '<div class="relative max-w-7xl mx-auto px-4 py-24 text-center">'+
         '<div class="inline-flex items-center gap-2 bg-amber-500/90 text-green-950 px-5 py-2 rounded-full text-sm font-bold mb-4 shadow-lg"><i class="fas fa-medal"></i> Desde 1996 &bull; Iju&iacute; - RS</div>'+
         '<h1 class="text-5xl md:text-6xl font-bold leading-tight mb-6">Mais que Produtos, <span class="text-amber-400">Soluções</span></h1>'+
       '</div>'+
     '</section>';
   }
-  var slides=featured.map(function(p,i){
-    var price=featFormatPrice(p.price);
-    var oldPrice=p.oldPrice?featFormatPrice(p.oldPrice):'';
-    var discount=(p.oldPrice&&p.oldPrice>p.price)?Math.round((1-p.price/p.oldPrice)*100):0;
-    return'<div class="carousel-slide" data-slide="'+i+'">'+
-      '<div class="carousel-slide-inner cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
-        '<div class="relative h-[480px] md:h-[520px] overflow-hidden rounded-3xl shadow-2xl bg-white">'+
-          imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'4%'})+
-          '<div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/10"></div>'+
-          '<div class="absolute inset-x-0 bottom-0 p-7 md:p-10">'+
-            '<div class="flex flex-wrap items-center gap-2 mb-3">'+
-              '<span class="carousel-fade-badge inline-flex items-center gap-1.5 bg-amber-500/95 text-green-950 text-xs font-bold px-3 py-1.5 rounded-full shadow-lg"><i class="fas fa-star"></i> Destaque '+(i+1)+'/'+featured.length+'</span>'+
-              '<span class="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-white/25">'+p.category+'</span>'+
-              (p.brand?'<span class="inline-flex items-center gap-1 bg-white/15 backdrop-blur-md text-white text-xs font-semibold px-3 py-1.5 rounded-full border border-white/25">'+p.brand+'</span>':'')+
-            '</div>'+
-            '<h2 class="carousel-fade-title text-2xl md:text-4xl lg:text-5xl font-bold text-white mb-2 md:mb-3 leading-tight drop-shadow">'+p.name+'</h2>'+
-            '<p class="carousel-fade-copy text-white/80 text-sm md:text-base lg:text-lg mb-3 md:mb-5 max-w-xl leading-relaxed">'+(p.description||'Produto de alta qualidade para o campo e seus animais.')+'</p>'+
-            '<span class="inline-flex items-center gap-2 bg-white text-green-900 text-xs md:text-sm font-bold px-4 md:px-5 py-2 md:py-2.5 rounded-xl shadow-lg transition-transform group-hover:scale-105"><i class="fas fa-shopping-bag"></i> Ver Produto</span>'+
-          '</div>'+
-        '</div>'+
-      '</div>'+
-    '</div>';
-  }).join('');
+  var slides=featured.map(function(item,i){return carouselSlideForItem(item,i,featured.length)}).join('');
 
   var dots='';
   for(var i=0;i<featured.length;i++){
@@ -1360,7 +1406,6 @@ function renderFeaturedCarousel(featured){
   }
 
   return'<section class="relative bg-gradient-to-br from-green-900 via-green-800 to-emerald-900 text-white overflow-hidden">'+
-    '<div class="absolute inset-0 opacity-10" style="background-image:url(\'https://picsum.photos/seed/agro-hero/1200/600\');background-size:cover"></div>'+
     '<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(245,158,11,0.12),transparent_55%),radial-gradient(ellipse_at_bottom_right,rgba(16,185,129,0.15),transparent_55%)]"></div>'+
     '<div class="relative max-w-7xl mx-auto px-4 py-14 md:py-20">'+
       '<div class="text-center mb-8">'+
@@ -1486,6 +1531,21 @@ function getFilteredProducts(){
   return filtered;
 }
 
+function loadingCatalogGrid(){
+  let cards='';
+  for(let i=0;i<6;i++){
+    cards+='<div class="rounded-2xl border border-green-100 bg-white overflow-hidden shadow-sm">'+
+      '<div class="aspect-square bg-green-100/60 animate-pulse"></div>'+
+      '<div class="p-4 space-y-2">'+
+        '<div class="h-4 bg-green-100 animate-pulse rounded w-3/4"></div>'+
+        '<div class="h-3 bg-green-50 animate-pulse rounded w-1/2"></div>'+
+        '<div class="h-5 bg-green-100 animate-pulse rounded w-1/3 mt-3"></div>'+
+      '</div>'+
+    '</div>';
+  }
+  return '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+cards+'</div>';
+}
+
 function renderCatalogGrid(filtered){
   const shown=filtered.slice(0,catalogVisibleCount);
   let html='<div id="catalog-grid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+
@@ -1543,7 +1603,7 @@ function notifyProductsGrew(){
     _productsGrewPending=true;
     setTimeout(function(){
       _productsGrewPending=false;
-      if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='copilot')){
+      if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot')){
         try{ renderAdminSection(); }catch(e){}
       }
     },0);
@@ -1551,7 +1611,7 @@ function notifyProductsGrew(){
 }
 function notifyProductsFullyLoaded(){
   if(State.view==='catalog'&&document.getElementById('catalog-grid-area')) updateCatalogResults(true);
-  else if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='copilot')){
+  else if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot')){
     try{ renderAdminSection(); }catch(e){}
   }
 }
@@ -1559,12 +1619,13 @@ function notifyProductsFullyLoaded(){
 function renderCatalog(){
   const filters=DB.filters();
   const products=DB.products().filter(function(p){return p.active});
+  if(products.length) window._catCatalogHadData=true;
   const filtered=getFilteredProducts();
   resetCatalogPagination();
 
   const allBrands=getAllBrands();
   const allSpecies=getAllSpecies();
-  const featured=products.filter(function(p){return p.featured}).slice(0,5);
+  const featured=getCarouselHighlights();
 
   return'<div class="fade-in">'+
   (DB.loadError()&&!products.length?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
@@ -1642,14 +1703,15 @@ function renderCatalog(){
           (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
         '</div>':'')+
 
-        '<p class="text-sm text-gray-500 mb-5"><strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')+'</p>'+
+        '<p class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> Carregando produtos do cat&aacute;logo...</span>':('<strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')))+'</p>'+
 
-        (filtered.length===0?'<div class="text-center py-20">'+
+        (filtered.length===0?(DB.isLoading()&&!DB.loadError()?loadingCatalogGrid():
+        '<div class="text-center py-20">'+
           '<div class="text-6xl mb-4">🔍</div>'+
           '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
           '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
           '<button onclick="clearFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button>'+
-        '</div>':renderCatalogGrid(filtered))+
+        '</div>'):renderCatalogGrid(filtered))+
       '</div>'+
     '</div>'+
   '</section>'+
@@ -1685,9 +1747,27 @@ function renderCatalog(){
 function updateCatalogResults(keepPage){
   var filters=DB.filters();
   var filtered=getFilteredProducts();
+  // Primeiro carregamento apos o shell instantaneo: monta o carrossel de
+  // destaques junto com os produtos re-renderizando a pagina inteira.
+  if(State.view==='catalog'&&!window._catCatalogHadData&&filtered.length>0){
+    window._catCatalogHadData=true;
+    render();
+    return;
+  }
+  var cw=document.getElementById('catalog-carousel-wrap');
+  // Novos destaques podem ter chegado depois do primeiro render (o catalogo e
+  // carregado em lotes no Firestore). Se o carrossel visivel nao mostra mais
+  // todos os destaques do catalogo, re-renderiza a pagina inteira para
+  // atualiza-lo sem depender de navegacao.
+  if(cw&&(cw.style.display!=='none')){
+    var featured=getCarouselHighlights();
+    if(featured.length!==cw.querySelectorAll('.carousel-slide').length){
+      render();
+      return;
+    }
+  }
   if(!keepPage) resetCatalogPagination();
 
-  var cw=document.getElementById('catalog-carousel-wrap');
   if(cw) cw.style.display=(filters.category||filters.search||filters.species||filters.brand)?'none':'block';
 
   var aside=document.getElementById('catalog-filters-aside');
@@ -1793,9 +1873,15 @@ function orderWhatsApp(pid){
 // ============================================================
 // VIEW: PRODUCT DETAIL
 // ============================================================
+function productUrl(id){
+  return location.href.split('#')[0]+'#v=product&p='+encodeURIComponent(id);
+}
 function renderProductDetail(id){
   const p=DB.products().find(function(x){return x.id===id});
-  if(!p) return'<div class="text-center py-20"><p>Produto nao encontrado</p><button onclick="navigate(\'catalog\')" class="mt-4 bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar</button></div>';
+  if(!p){
+    if(!DB.productsReady()&&!DB.loadError()) return '<div class="max-w-7xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
+    return'<div class="text-center py-20"><p>Produto nao encontrado</p><button onclick="navigate(\'catalog\')" class="mt-4 bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar</button></div>';
+  }
   trackEvent('product_view',{productId:p.id,name:p.name,brand:p.brand||'',category:p.category});
   const discount=p.originalPrice?Math.round((1-p.price/p.originalPrice)*100):0;
   const related=DB.products().filter(function(x){return x.active&&x.category===p.category&&x.id!==p.id}).slice(0,4);
@@ -1838,6 +1924,9 @@ function renderProductDetail(id){
           '<button onclick="orderWhatsApp(\''+p.id+'\')" class="flex-1 min-w-[220px] bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl transition-all hover:shadow-lg text-lg">'+
             '<i class="fab fa-whatsapp mr-2"></i>Falar com um vendedor'+
           '</button>'+
+          '<a href="https://api.whatsapp.com/send?text='+encodeURIComponent('Confira esse produto da Agrovel: '+p.name+' '+productUrl(p.id))+'" target="_blank" rel="noopener" class="flex-1 min-w-[220px] bg-white border-2 border-green-500 text-green-700 hover:bg-green-50 font-bold py-3 px-6 rounded-xl transition-all text-center text-lg">'+
+            '<i class="fab fa-whatsapp mr-2"></i>Enviar esse produto por WhatsApp'+
+          '</a>'+
         '</div>'+
         (p.techInfo?'<div class="bg-gray-50 border border-gray-200 rounded-xl p-4">'+
           '<h4 class="font-semibold text-gray-700 text-sm mb-2"><i class="fas fa-clipboard-list text-green-500 mr-2"></i>Ficha Tecnica</h4>'+
@@ -2184,20 +2273,31 @@ function showLoginError(msg){
   el.classList.remove('hidden');el.textContent=msg;
 }
 function initAuth(){
-  if(!fbAuthAvailable())return;
-  firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){});
-  firebase.auth().onAuthStateChanged(function(user){
-    if(user){
-      const u=DB.users().find(function(x){return x.email===user.email});
-      if(u){DB.setCurrentUser(u);renderUserMenu();}
-      else{firebase.auth().signOut().catch(function(){});}
-    }else if(!DB.currentUser()){
-      renderUserMenu();
-    }
+  // So carrega o modulo de auth se houver sessao persistida; visitantes
+  // comuns do catalogo nao baixam os ~132KB do firebase-auth.
+  try{
+    var hasSession=Object.keys(localStorage).some(function(k){return k.indexOf('firebase:authUser')===0||k.indexOf('firebaseAuth')===0});
+    if(!hasSession) return;
+  }catch(e){ return; }
+  ensureFirebaseAuth().then(function(){
+    if(!fbAuthAvailable()) return;
+    try{ firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(function(){}); }catch(e){}
+    try{
+      firebase.auth().onAuthStateChanged(function(user){
+        if(user){
+          const u=DB.users().find(function(x){return x.email===user.email});
+          if(u){DB.setCurrentUser(u);renderUserMenu();}
+          else{firebase.auth().signOut().catch(function(){});}
+        }else if(!DB.currentUser()){
+          renderUserMenu();
+        }
+      });
+    }catch(e){}
   });
 }
 async function doLogin(e){
   e.preventDefault();
+  await ensureFirebaseAuth();
   const f=new FormData(e.target);
   const users=DB.users();
   const u=users.find(function(x){return x.email===f.get('email')&&x.password===f.get('password')});
@@ -2294,7 +2394,7 @@ function readingMinutes(content){
 }
 function newsCoverImg(n,cls){
   var src=n&&n.cover||'';
-  var alt=esc((n&&n.title)||'AgrovelInforma');
+  var alt=esc((n&&n.title)||'Agrovel Informa');
   if(src&&String(src).indexOf('idb:')===0) return '<img data-idb="'+src+'" class="'+cls+'" alt="'+alt+'">';
   if(src) return '<img src="'+src+'" class="'+cls+'" alt="'+alt+'">';
   return '<div class="'+cls+' flex items-center justify-center bg-gradient-to-br from-green-100 to-emerald-100 text-green-400"><i class="fas fa-newspaper text-4xl md:text-5xl"></i></div>';
@@ -2392,10 +2492,9 @@ function renderBlog(){
   }
   return '<div class="fade-in">'+
     '<section class="relative bg-gradient-to-br from-green-900 via-green-800 to-emerald-900 text-white overflow-hidden">'+
-      '<div class="absolute inset-0 opacity-10" style="background-image:url(\'https://picsum.photos/seed/agrovel-blog-hero/1200/500\');background-size:cover"></div>'+
       '<div class="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(245,158,11,0.12),transparent_55%)]"></div>'+
       '<div class="relative max-w-7xl mx-auto px-4 py-12 md:py-16 text-center">'+
-        '<div class="inline-flex items-center gap-2 bg-amber-500/90 text-green-950 px-5 py-2 rounded-full text-sm font-bold mb-4 shadow-lg"><i class="fas fa-newspaper"></i> AGROVELinforma</div>'+
+        '<div class="inline-flex items-center gap-2 bg-amber-500/90 text-green-950 px-5 py-2 rounded-full text-sm font-bold mb-4 shadow-lg"><i class="fas fa-newspaper"></i> AGROVEL Informa</div>'+
         '<h1 class="text-3xl md:text-5xl font-bold leading-tight mb-4">Not\u00edcias, dicas e novidades<br><span class="text-amber-400">do Agroneg\u00f3cio</span></h1>'+
         '<p class="text-green-200 max-w-2xl mx-auto text-sm md:text-base">Acompanhe as \u00faltimas informa\u00e7\u00f5es, tecnologias e eventos que fazem a diferen\u00e7a no campo.</p>'+
       '</div>'+
@@ -2427,7 +2526,7 @@ function renderBlog(){
           '<h3 class="text-xl md:text-2xl font-extrabold mb-1">Nossa equipe est\u00e1 pronta para ajudar.</h3>'+
           '<p class="text-green-200 text-sm">Tire d\u00favidas sobre produtos, manejo e sanidade com quem entende do campo.</p>'+
         '</div>'+
-        '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Vim pelo AGROVELinforma e gostaria de falar com um vendedor.')+'" target="_blank" rel="noopener" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-6 py-3.5 rounded-xl whitespace-nowrap text-center"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</a>'+
+        '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Vim pelo AGROVEL Informa e gostaria de falar com um vendedor.')+'" target="_blank" rel="noopener" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-6 py-3.5 rounded-xl whitespace-nowrap text-center"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</a>'+
       '</div>'+
     '</section>'+
   '</div>';
@@ -2477,7 +2576,10 @@ function renderBlogPost(id){
   var news=DB.news();
   var idx=news.findIndex(function(x){return x.id===id});
   var n=idx>=0?news[idx]:null;
-  if(!n||!n.active) return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="text-6xl mb-4">\ud83d\udced</div><h2 class="text-xl font-bold text-gray-700 mb-4">Publica\u00e7\u00e3o n\u00e3o encontrada</h2><button onclick="navigate(\'blog\')" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar ao blog</button></div>';
+  if(!n||!n.active){
+    if(!DB.newsReady()&&!DB.loadError()) return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando publica\u00e7\u00e3o...</p></div></div>';
+    return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="text-6xl mb-4">\ud83d\udced</div><h2 class="text-xl font-bold text-gray-700 mb-4">Publica\u00e7\u00e3o n\u00e3o encontrada</h2><button onclick="navigate(\'blog\')" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar ao blog</button></div>';
+  }
   if(!n.views)n.views=0;
   news[idx].views=n.views+1;
   DB.setNews(news);
@@ -2493,7 +2595,7 @@ function renderBlogPost(id){
     '<nav class="text-sm text-gray-500 mb-6 flex items-center gap-2 flex-wrap">'+
       (_appNavDepth>0?'<button onclick="goAppBack()" class="inline-flex items-center gap-1.5 hover:text-green-700 font-semibold"><i class="fas fa-arrow-left text-xs"></i>Voltar</button><i class="fas fa-chevron-right text-xs"></i>':'')+
       '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">In\u00edcio</button><i class="fas fa-chevron-right text-xs"></i>'+
-      '<button onclick="navigate(\'blog\')" class="hover:text-green-700">AGROVELinforma</button><i class="fas fa-chevron-right text-xs"></i>'+
+      '<button onclick="navigate(\'blog\')" class="hover:text-green-700">AGROVEL Informa</button><i class="fas fa-chevron-right text-xs"></i>'+
       '<span class="text-gray-800 font-medium line-clamp-1">'+esc(n.title)+'</span>'+
     '</nav>'+
     '<div class="rounded-2xl border border-green-100 bg-white shadow-sm overflow-hidden">'+
@@ -2531,7 +2633,7 @@ function renderBlogPost(id){
     '</div>'+
     '<div class="mt-8 rounded-2xl bg-gradient-to-r from-green-900 to-emerald-800 p-6 md:p-8 text-white flex flex-col md:flex-row md:items-center md:justify-between gap-4">'+
       '<div><div class="font-bold text-lg mb-1">Ficou com d\u00favidas?</div><p class="text-green-200 text-sm">Fale com um vendedor Agrovel e receba orienta\u00e7\u00e3o especializada.</p></div>'+
-      '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Vim pelo AGROVELinforma e gostaria de falar com um vendedor.')+'" target="_blank" rel="noopener" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-5 py-3 rounded-xl whitespace-nowrap text-center"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</a>'+
+      '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Vim pelo AGROVEL Informa e gostaria de falar com um vendedor.')+'" target="_blank" rel="noopener" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-5 py-3 rounded-xl whitespace-nowrap text-center"><i class="fab fa-whatsapp mr-2"></i>Falar com vendedor</a>'+
     '</div>'+
     (related.length?'<div class="mt-12"><h2 class="text-xl md:text-2xl font-bold text-gray-900 mb-5">Leia tamb\u00e9m</h2><div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">'+related.map(blogCard).join('')+'</div></div>':'')+
   '</div>';
@@ -2586,7 +2688,7 @@ function renderAbout(){
     '</section>'+
     '<section class="rounded-3xl bg-gradient-to-r from-green-900 to-emerald-800 p-8 md:p-12 text-center text-white">'+
       '<h2 class="text-2xl md:text-3xl font-extrabold mb-3">Vamos conversar?</h2>'+
-      '<p class="text-green-200 max-w-xl mx-auto mb-6">Visite nossa loja, acompanhe o <button onclick="navigate(\'blog\')" class="text-amber-400 font-bold underline hover:text-amber-300">AGROVELinforma</button> e fique por dentro das novidades do agroneg&oacute;cio.</p>'+
+      '<p class="text-green-200 max-w-xl mx-auto mb-6">Visite nossa loja, acompanhe o <button onclick="navigate(\'blog\')" class="text-amber-400 font-bold underline hover:text-amber-300">AGROVEL Informa</button> e fique por dentro das novidades do agroneg&oacute;cio.</p>'+
       '<button onclick="navigate(\'catalog\')" class="bg-amber-500 hover:bg-amber-400 text-green-950 font-bold px-8 py-4 rounded-xl transition-colors"><i class="fas fa-store mr-2"></i>Ver o cat&aacute;logo</button>'+
     '</section>'+
   '</div>';
@@ -2608,6 +2710,7 @@ function renderAdmin(){
     //{id:'customers',icon:'fa-users',label:'Clientes',role:'admin'},
     {id:'categories',icon:'fa-tags',label:'Categorias',role:'admin'},
     {id:'promos',icon:'fa-bullhorn',label:'Promo\u00e7\u00f5es',role:'admin'},
+    {id:'highlights',icon:'fa-star',label:'Destaques',role:'admin'},
     {id:'copilot',icon:'fa-robot',label:'Copilot IA',role:'admin'},
     {id:'whatsapp',icon:'fab fa-whatsapp',label:'WhatsApp',role:'admin'},
     {id:'news',icon:'fa-newspaper',label:'Not\u00edcias',role:'admin'},
@@ -2740,6 +2843,7 @@ function renderAdminSection(){
     case 'customers':el.innerHTML=renderAdminCustomers();break;
     case 'categories':el.innerHTML=renderAdminCategories();break;
     case 'promos':el.innerHTML=renderAdminPromos();initPromoForm();resolveIdbMedia(el);break;
+    case 'highlights':el.innerHTML=renderAdminHighlights();initHighlightForm();resolveIdbMedia(el);break;
     case 'copilot':el.innerHTML=renderCopilotPage();initCopilotChart();break;
     case 'whatsapp':el.innerHTML=renderAdminWhatsApp();break;
     case 'news':el.innerHTML=renderAdminNews();resolveIdbMedia(el);break;
@@ -3777,6 +3881,290 @@ function deletePromo(id){
   renderAdminSection();
 }
 
+// ============================================================
+// ADMIN: DESTAQUES (carrossel da home)
+// Produtos em destaque (max. 5) + campanhas fora do catalogo
+// ============================================================
+function toggleSwitchHtml(on,onclick){
+  return '<button type="button" onclick="'+onclick+'" title="'+(on?'Clique para desligar':'Clique para ligar')+'"'+
+    ' style="width:44px;height:24px;border-radius:999px;background:'+(on?'#16a34a':'#d1d5db')+';border:none;position:relative;cursor:pointer;flex-shrink:0;transition:background .15s;box-shadow:inset 0 1px 2px rgba(0,0,0,.14)">'+
+    '<span style="position:absolute;top:4px;left:'+(on?'24px':'4px')+';width:16px;height:16px;border-radius:999px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);transition:left .15s"></span>'+
+  '</button>';
+}
+
+function toggleHighlightProduct(id){
+  var products=DB.products();
+  var p=products.find(function(x){return x.id===id});
+  if(!p) return;
+  var on=!p.featured;
+  if(on){
+    var cnt=products.filter(function(x){return x.id!==id&&x.featured}).length;
+    if(cnt>=5){showToast('Limite de 5 produtos em destaque atingido. Desligue um para ligar outro.','error');return}
+  }
+  p.featured=on;
+  DB.setProducts(products);
+  var onCount=products.filter(function(x){return x.featured}).length;
+  showToast(on?('Produto marcado como destaque ('+onCount+'/5).'):'Produto removido dos destaques','info');
+  renderAdminSection();
+}
+
+function filterHighlightProducts(val){
+  var q=((val||'').toLowerCase()||'').trim();
+  var rows=document.querySelectorAll('#hl-products-list > *');
+  rows.forEach(function(row){
+    var name=(row.getAttribute('data-name')||'');
+    row.style.display=q&&name.indexOf(q)<0?'none':'';
+  });
+}
+
+function renderAdminHighlights(){
+  var products=DB.products().slice().sort(function(a,b){
+    var af=a&&a.featured?1:0,bf=b&&b.featured?1:0;
+    if(af!==bf)return bf-af;
+    return (a.name||'').localeCompare(b.name||'');
+  });
+  var onCount=products.filter(function(p){return p&&p.featured}).length;
+  var overLimit=onCount>5;
+  var fills=onCount>5?0:5-onCount;
+  var highlights=DB.highlights();
+  var bars='';
+  var totalBars=Math.max(5,onCount);
+  for(var i=0;i<totalBars;i++){
+    var col=i<onCount?(i<5?'#16a34a':'#ef4444'):'#e5e7eb';
+    bars+='<div style="width:28px;height:8px;border-radius:999px;background:'+col+'"></div>';
+  }
+  return '<div class="p-4 md:p-8 fade-in">'+
+    '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900"><i class="fas fa-star text-amber-500 mr-2"></i>Destaques</h1>'+
+      '<p class="text-gray-400 text-sm">Controle os produtos em destaque e crie campanhas que aparecem no carrossel da home (m\u00e1ximo de 5 produtos ligados).</p></div>'+
+    '</div>'+
+    '<div class="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-gray-100 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">'+
+      '<div class="flex items-center gap-3">'+
+        '<div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center"><i class="fas fa-toggle-on text-lg"></i></div>'+
+        '<div><div class="text-sm font-bold '+(overLimit?'text-red-600':'text-gray-800')+'">'+onCount+' de 5 produtos em destaque'+(overLimit?' (excedido)':'')+'</div>'+
+        (overLimit
+          ?'<div class="text-xs text-red-500">Excede o limite de 5. Desligue '+(onCount-5)+' produto'+(onCount-5===1?'':'s')+' para voltar ao limite.</div>'
+          :'<div class="text-xs text-gray-400">'+fills+' vaga'+(fills===1?'':'s')+' restante'+(fills===1?'':'s')+'</div>')+'</div>'+
+      '</div>'+
+      '<div class="flex gap-1.5">'+bars+'</div>'+
+    '</div>'+
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-8">'+
+      '<div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 md:px-6 py-4 border-b border-gray-100">'+
+        '<div><h3 class="font-bold text-gray-800"><i class="fas fa-box-open text-green-600 mr-2"></i>Produtos</h3>'+
+        '<p class="text-xs text-gray-400 mt-0.5">Use o bot\u00e3o liga/desliga ao lado de cada produto para definir os destaques.</p></div>'+
+        '<input id="hl-prod-search" type="text" placeholder="Buscar produto..." oninput="filterHighlightProducts(this.value)" style="width:100%;max-width:20rem" class="px-4 py-2 border border-gray-200 rounded-xl focus:border-green-500 outline-none text-sm">'+
+      '</div>'+
+      '<div id="hl-products-list" class="divide-y divide-gray-50">'+
+        (products.length===0?'<div class="p-10 text-center text-gray-400"><div class="text-5xl mb-3"><i class="fas fa-box-open"></i></div><p>Nenhum produto cadastrado.</p></div>':
+        products.map(function(p){
+          return '<div class="p-4 md:p-5 flex items-center gap-4 hover:bg-green-50/30 transition-colors" data-name="'+(p.name||'').toLowerCase()+'">'+
+            '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(p.images[0],p,0,p.name)+'</div>'+
+            '<div class="flex-1 min-w-0">'+
+              '<div class="flex items-center gap-2 flex-wrap"><span class="font-medium text-gray-900 text-sm truncate">'+p.name+'</span>'+
+                (p.featured?'<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0"><i class="fas fa-star mr-0.5"></i>Destaque</span>':'')+
+              '</div>'+
+              '<div class="text-xs text-gray-400 mt-0.5">'+p.category+' \u2022 SKU: '+p.sku+'</div>'+
+            '</div>'+
+            toggleSwitchHtml(!!p.featured,"toggleHighlightProduct('"+p.id+"')")+
+          '</div>';
+        }).join(''))+
+      '</div>'+
+    '</div>'+
+    '<div class="bg-white rounded-2xl p-4 md:p-6 shadow-sm border border-gray-100 mb-8">'+
+      '<div class="flex items-center justify-between mb-5">'+
+        '<h3 class="font-bold text-gray-800">'+(State.editingHighlight?'Editar Campanha':'Nova Campanha (destaque fora do cat\u00e1logo)')+'</h3>'+
+        (State.editingHighlight?'<button onclick="cancelEditHighlight()" class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors">Cancelar edi\u00e7\u00e3o</button>':'')+
+      '</div>'+
+      '<p class="text-sm text-gray-500 mb-4">Campanhas s\u00e3o exibidas apenas no carrossel de destaques da home, com imagem e texto pr\u00f3prios. N\u00e3o contam para o limite de 5 produtos.</p>'+
+      '<div class="flex items-center gap-3 mb-4">'+
+        '<span class="text-sm text-gray-600">Ativa</span>'+
+        '<input id="hl-active" type="checkbox" class="w-5 h-5 rounded accent-green-500 cursor-pointer">'+
+      '</div>'+
+      '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">'+
+        '<div><label class="text-sm text-gray-600 mb-1 block">T\u00edtulo *</label>'+
+          '<input id="hl-title" type="text" placeholder="Ex: Semana do Cliente Agrovel" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none"></div>'+
+        '<div><label class="text-sm text-gray-600 mb-1 block">Texto / Descri\u00e7\u00e3o</label>'+
+          '<textarea id="hl-text" rows="2" placeholder="Texto de apoio..." class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none resize-none"></textarea></div>'+
+        '<div class="md:col-span-2"><label class="text-sm text-gray-600 mb-1 block">Imagem (URL ou upload)</label>'+
+          '<input id="hl-image-url" type="text" placeholder="https://.../imagem.jpg" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 outline-none mb-2">'+
+          '<input type="file" id="hl-image-file" accept="image/*" class="hidden" onchange="handleHighlightImageFile(this)">'+
+          '<button type="button" onclick="document.getElementById(\'hl-image-file\').click()" class="text-sm bg-green-50 hover:bg-green-100 text-green-700 font-medium py-2.5 rounded-xl border border-green-200 transition-colors w-full"><i class="fas fa-cloud-upload-alt mr-1.5"></i>Enviar imagem do dispositivo</button></div>'+
+      '</div>'+
+      '<div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 mt-5">'+
+        '<button onclick="saveHighlight()" class="bg-green-600 hover:bg-green-500 text-white font-bold px-6 py-3 rounded-xl transition-colors flex items-center justify-center gap-2"><i class="fas fa-save"></i>'+(State.editingHighlight?'Salvar Alteracoes':'Cadastrar Campanha')+'</button>'+
+      '</div>'+
+    '</div>'+
+    '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">'+
+      '<div class="flex items-center justify-between px-4 md:px-6 py-4 border-b border-gray-100">'+
+        '<h3 class="font-bold text-gray-800"><i class="fas fa-bullhorn text-green-600 mr-2"></i>Campanhas Cadastradas</h3>'+
+        '<span class="text-xs text-gray-400">'+highlights.length+' campanha'+(highlights.length===1?'':'s')+'</span>'+
+      '</div>'+
+      (highlights.length===0?'<div class="p-10 text-center text-gray-400"><div class="text-5xl mb-3"><i class="fas fa-star"></i></div><p>Nenhuma campanha cadastrada ainda.</p></div>':'<div class="divide-y divide-gray-50">'+
+        highlights.map(function(h){
+          var badge=h.active?'<span class="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full font-medium"><i class="fas fa-circle mr-1" style="font-size:8px"></i>Ativa</span>':'<span class="text-xs bg-gray-100 text-gray-500 px-2 py-1 rounded-full font-medium"><i class="fas fa-circle mr-1" style="font-size:8px"></i>Inativa</span>';
+          return '<div class="p-4 md:p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-5 hover:bg-green-50/30 transition-colors">'+
+            '<div class="w-full sm:w-24 flex-shrink-0">'+mediaEl(h)+'</div>'+
+            '<div class="flex-1 min-w-0">'+
+              '<div class="flex items-center gap-3 mb-1"><span class="font-bold text-gray-900 truncate">'+(h.title||'Sem titulo')+'</span>'+badge+'</div>'+
+              '<p class="text-sm text-gray-500 truncate">'+(h.text||'Sem texto')+'</p>'+
+              '<div class="flex flex-wrap gap-2 mt-2 text-xs text-gray-400">'+
+                '<span class="bg-gray-50 px-2 py-0.5 rounded-md"><i class="fas fa-calendar mr-1"></i>'+formatDate(h.createdAt)+'</span>'+
+                (h.image?'<span class="bg-gray-50 px-2 py-0.5 rounded-md"><i class="fas fa-image mr-1"></i>Imagem</span>':'')+
+              '</div>'+
+            '</div>'+
+            '<div class="flex items-center gap-2 flex-shrink-0 w-full sm:w-auto">'+
+              (h.active
+                ?'<button onclick="toggleHighlightActive(\''+h.id+'\')" class="px-3 py-2 text-sm rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 font-medium transition-colors" title="Desativar"><i class="fas fa-pause mr-1"></i>Desativar</button>'
+                :'<button onclick="toggleHighlightActive(\''+h.id+'\')" class="px-3 py-2 text-sm rounded-lg bg-green-600 hover:bg-green-500 text-white font-medium transition-colors" title="Ativar"><i class="fas fa-play mr-1"></i>Ativar</button>')+
+              '<button onclick="editHighlight(\''+h.id+'\')" class="px-3 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors" title="Editar"><i class="fas fa-pen mr-1"></i>Editar</button>'+
+              '<button onclick="deleteHighlight(\''+h.id+'\')" class="w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors" title="Excluir"><i class="fas fa-trash text-sm"></i></button>'+
+            '</div>'+
+          '</div>';
+        }).join('')+
+      '</div>')+
+    '</div>'+
+  '</div>';
+}
+
+var _highlightImage=null;
+var _highlightDirHandle=null;
+
+async function saveHighlightMediaToFolder(file){
+  if(!window.showDirectoryPicker) return null;
+  try{
+    var dir=_highlightDirHandle;
+    if(!dir){
+      showToast('Selecione a pasta img/destaques na janela seguinte','warn');
+      dir=await window.showDirectoryPicker({mode:'readwrite'});
+      _highlightDirHandle=dir;
+    }
+    var perm=await dir.queryPermission({mode:'readwrite'});
+    if(perm!=='granted') perm=await dir.requestPermission({mode:'readwrite'});
+    if(perm!=='granted') return null;
+    var safeName=Date.now()+'_'+file.name.replace(/[^A-Za-z0-9._-]+/g,'_');
+    var handle=await dir.getFileHandle(safeName,{create:true});
+    var w=await handle.createWritable();
+    await w.write(file);
+    await w.close();
+    return 'img/destaques/'+safeName;
+  }catch(e){return null}
+}
+
+function handleHighlightImageFile(input){
+  var f=input.files&&input.files[0];
+  if(!f) return;
+  if(f.type.indexOf('image/')!==0){showToast('Somente arquivos de imagem','warn');input.value='';return}
+  _highlightImage=null;
+  var imgurl=document.getElementById('hl-image-url');
+  var saveResult=saveHighlightMediaToFolder(f);
+  compressImage(f,function(src,name){
+    saveResult.then(function(path){
+      if(path){
+        _highlightImage=path;
+        if(imgurl){imgurl.value=path;imgurl.placeholder='';}
+        showToast('Imagem salva em img/destaques');
+      } else if(_highlightImage===null){
+        if(src.length>3500000){
+          storeMediaBlob(f,f.type||'image/jpeg',function(ref){
+            if(ref){
+              _highlightImage=ref;
+              if(imgurl){imgurl.value='';imgurl.placeholder='Imagem carregada do dispositivo.'}
+              showToast('Imagem carregada');
+            } else {
+              _highlightImage=src;
+              if(imgurl){imgurl.value='';imgurl.placeholder='Imagem carregada do dispositivo.'}
+              showToast('Imagem carregada');
+            }
+          });
+        } else {
+          _highlightImage=src;
+          if(imgurl){imgurl.value='';imgurl.placeholder='Imagem carregada do dispositivo.'}
+          showToast('Imagem carregada');
+        }
+      }
+    });
+  });
+  input.value='';
+}
+
+function initHighlightForm(){
+  var editingId=State.editingHighlight;
+  var h=editingId?DB.highlights().find(function(x){return x.id===editingId}):null;
+  _highlightImage=null;
+  if(h){_highlightImage=h.image||null;}
+  var t=document.getElementById('hl-title');
+  var tx=document.getElementById('hl-text');
+  var imgurl=document.getElementById('hl-image-url');
+  var active=document.getElementById('hl-active');
+  if(t)t.value=h?(h.title||''):'';
+  if(tx)tx.value=h?(h.text||''):'';
+  if(imgurl)imgurl.value=(h&&h.image&&String(h.image).indexOf('data:')!==0&&String(h.image).indexOf('idb:')!==0)?(h.image||''):'';
+  if(active)active.checked=h?!!h.active:true;
+}
+
+function saveHighlight(){
+  var title=document.getElementById('hl-title').value.trim();
+  if(!title){showToast('Informe o t\u00edtulo da campanha','warn');return}
+  var text=document.getElementById('hl-text').value.trim();
+  var imageurl=document.getElementById('hl-image-url').value.trim();
+  var image=_highlightImage||imageurl||null;
+  var active=document.getElementById('hl-active').checked;
+  var list=DB.highlights();
+  var editingId=State.editingHighlight;
+  if(editingId){
+    var idx=list.findIndex(function(x){return x.id===editingId});
+    if(idx>=0){
+      var old=list[idx];
+      if(old.image!==(image||null)&&String(old.image||'').indexOf('idb:')===0)deleteMediaBlob(old.image);
+      list[idx]=Object.assign({},list[idx],{title:title,text:text,image:image,active:active});
+    }
+  } else {
+    list.unshift({id:'hl'+genId(),title:title,text:text,image:image,active:active,createdAt:new Date().toISOString()});
+  }
+  var saved=DB.setHighlights(list);
+  if(!saved) return;
+  showToast(editingId?'Campanha atualizada com sucesso!':'Campanha cadastrada com sucesso!');
+  State.editingHighlight=null;
+  _highlightImage=null;
+  renderAdminSection();
+}
+
+function editHighlight(id){
+  State.editingHighlight=id;
+  renderAdminSection();
+}
+
+function cancelEditHighlight(){
+  State.editingHighlight=null;
+  _highlightImage=null;
+  renderAdminSection();
+}
+
+function toggleHighlightActive(id){
+  var list=DB.highlights();
+  var idx=list.findIndex(function(x){return x.id===id});
+  if(idx<0) return;
+  var next=!list[idx].active;
+  list[idx].active=next;
+  if(DB.setHighlights(list)){
+    showToast(next?'Campanha ativada!':'Campanha desativada',next?'success':'warn');
+  }
+  renderAdminSection();
+}
+
+function deleteHighlight(id){
+  if(!confirm('Tem certeza que deseja excluir esta campanha?')) return;
+  var target=DB.highlights().find(function(x){return x.id===id});
+  if(target){
+    deleteMediaBlob(target.image);
+  }
+  var list=DB.highlights().filter(function(x){return x.id!==id});
+  DB.setHighlights(list);
+  if(State.editingHighlight===id){State.editingHighlight=null;_highlightImage=null;}
+  showToast('Campanha exclu\u00edda','warn');
+  renderAdminSection();
+}
+
 function promoBadgeHtml(){
   return '<div style="display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,0.16);backdrop-filter:blur(10px);color:#fff;font-size:11px;font-weight:800;letter-spacing:.6px;text-transform:uppercase;padding:7px 14px;border-radius:999px;border:1px solid rgba(255,255,255,0.28);box-shadow:0 4px 14px rgba(0,0,0,0.18)"><i class="fas fa-bullhorn" style="color:#fde047;font-size:12px"></i> Promo\u00e7\u00e3o Ativa</div>';
 }
@@ -4027,7 +4415,7 @@ function renderAdminNews(){
   var sorted=news.slice().sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
   return '<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
-      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Not\u00edcias / Blog</h1><p class="text-gray-400 text-sm">'+news.length+' publica\u00e7\u00f5es no AGROVELinforma</p></div>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Not\u00edcias / Blog</h1><p class="text-gray-400 text-sm">'+news.length+' publica\u00e7\u00f5es no AGROVEL Informa</p></div>'+
       '<button onclick="startNewsForm(null)" class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors flex items-center gap-2 text-sm"><i class="fas fa-plus"></i>Nova Not\u00edcia</button>'+
     '</div>'+
     '<div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-x-auto">'+
@@ -4398,10 +4786,10 @@ function compressImage(file, cb){
   reader.readAsDataURL(file);
 }
 
-function uploadProductImage(src,folder){
-  if(!window.firebase || !firebase.storage || String(src).indexOf('data:')!==0){
-    return Promise.resolve(src);
-  }
+async function uploadProductImage(src,folder){
+  if(String(src).indexOf('data:')!==0) return src;
+  await ensureFirebaseStorage();
+  if(!window.firebase || !firebase.storage) return src;
   return new Promise(function(resolve){
     var done=false;
     function finish(v){ if(done)return; done=true; resolve(v); }
@@ -4708,6 +5096,15 @@ function saveProduct(e,id){
       return (isNaN(x)||isNaN(y))?null:{x:x,y:y};
     });
     var tagsVal=f.get('tags');
+    var wantFeatured=f.get('featured')==='on';
+    var featured=wantFeatured;
+    if(wantFeatured){
+      var featuredCount=products.filter(function(x){return x.id!==id&&x.featured}).length;
+      if(featuredCount>=5){
+        featured=false;
+        showToast('Limite de 5 produtos em destaque atingido. Destaque n\u00e3o marcado. Desligue um em Destaques > Produtos.','warn');
+      }
+    }
     const data={
       name:f.get('name'),category:f.get('category'),sku:f.get('sku'),brand:f.get('brand')||null,
       species:f.get('species')||null,unitType:f.get('unitType')||'un',unitQty:parseFloat(f.get('unitQty'))||1,
@@ -4718,7 +5115,7 @@ function saveProduct(e,id){
       images:images,
       focalPoints:focalPoints,
       description:f.get('description'),techInfo:f.get('techInfo')||'',
-      featured:f.get('featured')==='on',active:f.get('active')==='on',prescription:f.get('prescription')==='on',
+      featured:featured,active:f.get('active')==='on',prescription:f.get('prescription')==='on',
     };
     if(id){
       const idx=products.findIndex(function(x){return x.id===id});
@@ -5171,8 +5568,9 @@ function copyPanelDesc(){if(_panelDesc)navigator.clipboard.writeText(_panelDesc)
 function applyPanelDescToForm(){const ta=document.getElementById('desc-textarea');if(ta&&_panelDesc){ta.value=_panelDesc;closeAllPanels();showToast('Descricao aplicada!');_generatedDesc=_panelDesc}else{showToast('Abra o formulario de produto primeiro','warn')}}
 
 // ============================================================
-// CARGA INICIAL - timeout, retry e estados de erro
-// (nunca exibir dados de exemplo quando o Firebase falha/lento)
+// CARGA INICIAL - resiliente a internet lenta
+// (nunca exibir dados de exemplo quando o Firebase falha/lento;
+//  tambem nunca exibir erro apenas por a conexao estar demorando)
 // ============================================================
 let _fbInitDone=false;
 function ensureFirebaseApp(){
@@ -5181,31 +5579,59 @@ function ensureFirebaseApp(){
   firebase.initializeApp(firebaseConfig);
   _fbInitDone=true;
 }
-function timeoutRace(promise, ms, label){
-  return new Promise(function(resolve){
-    var settled=false;
-    var timer=setTimeout(function(){
-      if(settled) return;
-      settled=true;
-      console.warn('Timeout ao carregar dados ('+label+')');
-      resolve({timedOut:true});
-    }, ms);
-    promise.then(function(res){
-      if(settled) return;
-      settled=true; clearTimeout(timer);
-      resolve({timedOut:false, result:res});
-    }).catch(function(err){
-      if(settled) return;
-      settled=true; clearTimeout(timer);
-      resolve({timedOut:false, error:err});
-    });
+// Auth e Storage sao carregados sob demanda (so sao usados em login/admin),
+// reduzindo ~170KB de JS no carregamento inicial do catalogo.
+var _fbModuleCache={};
+function loadFirebaseModule(name,src){
+  if(_fbModuleCache[name]) return _fbModuleCache[name];
+  _fbModuleCache[name]=new Promise(function(resolve){
+    var existing=document.querySelector('script[data-fbmod="'+name+'"]');
+    if(existing){
+      existing.addEventListener('load',function(){resolve()});
+      existing.addEventListener('error',function(){resolve()});
+      if(existing.dataset&&existing.dataset.loaded==='1') resolve();
+      return;
+    }
+    var s=document.createElement('script');
+    s.src=src;s.async=true;s.setAttribute('data-fbmod',name);
+    s.onload=function(){ if(s.dataset)s.dataset.loaded='1'; resolve(); };
+    s.onerror=function(){ delete _fbModuleCache[name]; resolve(); };
+    document.head.appendChild(s);
   });
+  return _fbModuleCache[name];
 }
-function loadingSplash(){
-  return '<div class="flex flex-col items-center justify-center min-h-[55vh] text-green-800 px-6">'+
-    '<div class="w-14 h-14 border-4 border-green-200 border-t-green-700 rounded-full animate-spin mb-5"></div>'+
-    '<p class="text-base font-semibold">Carregando cat&aacute;logo...</p>'+
-  '</div>';
+function ensureFirebaseAuth(){ return loadFirebaseModule('auth','https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'); }
+function ensureFirebaseStorage(){ return loadFirebaseModule('storage','https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js'); }
+
+// Carga dos dados sem timeout rígido: com conexao lenta o site continua
+// tentando e re-renderiza automaticamente quando os dados chegam.
+// Erro so e exibido se o Firebase realmente falhar (nao por demora).
+function refreshData(showToastOnError){
+  var slowTimer=null;
+  if(showToastOnError){
+    slowTimer=setTimeout(function(){
+      showToast('Internet lenta... ainda carregando o catálogo.','warn');
+    },8000);
+  }
+  return DB._loadCritical().then(function(){
+    if(slowTimer){clearTimeout(slowTimer);slowTimer=null;}
+    DB.setLoading(false);
+    if(State.view==='catalog'){
+      if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+      else render();
+    }else if(State.view==='product'||State.view==='blog'||State.view==='blog-post'||State.view==='admin'){
+      render();
+    }
+    renderCategoryNavs();
+    return {};
+  }).catch(function(e){
+    if(slowTimer){clearTimeout(slowTimer);slowTimer=null;}
+    console.error('Firebase init error', e);
+    DB._markLoadError('init');
+    DB.setLoading(false);
+    if(showToastOnError) setTimeout(function(){showToast('Erro ao conectar ao Firebase. Verifique sua conexao/internet.','error')},10);
+    return {};
+  });
 }
 async function retryCatalogLoad(){
   var btn=document.getElementById('catalog-retry-btn');
@@ -5215,14 +5641,13 @@ async function retryCatalogLoad(){
     const db=firebase.firestore();
     DB._setFire(db);
     DB.setLoading(true);
-    var r=await timeoutRace(DB._loadCritical(),10000,'retry loadCritical');
-    if(r.timedOut){ DB._markLoadError('timeout'); }
-    DB.setLoading(false);
+    DB._clearLoadError();
+    await refreshData(true);
   }catch(e){
     console.error('Firebase retry error',e);
     DB._markLoadError('init');
-    DB.setLoading(false);
   }
+  DB.setLoading(false);
   if(State.view==='catalog'||State.view==='admin') render();
   else navigate('catalog');
   if(btn) btn.disabled=false;
@@ -5250,23 +5675,6 @@ window.addEventListener('DOMContentLoaded', async function(){
     renderCartSidebar();
     renderCategoryNavs();
   }
-  function refreshData(showToastOnError){
-    return timeoutRace(DB._loadCritical(),10000,'loadCritical').then(function(r){
-      DB.setLoading(false);
-      if(r&&r.timedOut){ DB._markLoadError('timeout'); }
-      if(State.view==='catalog'){
-        if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
-      }else if(State.view==='blog'||State.view==='blog-post'){
-        render();
-      }
-      return r;
-    }).catch(function(e){
-      console.error('Firebase init error', e);
-      DB._markLoadError('init');
-      DB.setLoading(false);
-      if(showToastOnError) setTimeout(function(){showToast('Erro ao conectar ao Firebase. Verifique sua conexao/internet.','error')},10);
-    });
-  }
 
   if(useCache){
     renderInitial(); // catalogo fica navegavel imediatamente a partir do cache
@@ -5281,18 +5689,19 @@ window.addEventListener('DOMContentLoaded', async function(){
       DB.setLoading(false);
     }
   }else{
-    if(mc) mc.innerHTML=loadingSplash();
+    // Primeiro acesso: renderiza o shell (hero + skeleton) NA HORA e preenche
+    // em background. A tela nunca fica presa em um spinner aguardando a rede.
+    renderInitial();
     try{
       ensureFirebaseApp();
       DB._setFire(firebase.firestore());
       DB.setLoading(true);
-      await refreshData(true);
+      refreshData(true);
     }catch(e){
       console.error('Firebase init error', e);
       DB._markLoadError('init');
       DB.setLoading(false);
     }
-    renderInitial();
   }
   initAuth();
   setTimeout(function(){showPromoPopup();},600);
