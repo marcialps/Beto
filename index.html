@@ -514,10 +514,17 @@ const DB = (function(){
     }
   }
 
-  async function loadCritical(){
+  async function loadCritical(onPromoReady){
     mem['_loading']=true;
     mem['_loadError']=false;
-    const jobs = CRITICAL_KEYS.map(_fetchOne);
+    const promoJob = _fetchOne('promos');
+    promoJob.then(function(){
+      if(typeof onPromoReady==='function'){
+        try{onPromoReady();}catch(e){}
+      }
+      saveCache();
+    }).catch(function(){});
+    const jobs = CRITICAL_KEYS.filter(function(k){return k!=='promos'}).map(_fetchOne);
     jobs.push(loadProducts());
     jobs.push(loadProductsMeta());
     await Promise.all(jobs);
@@ -903,7 +910,7 @@ const DB = (function(){
     mem: mem,
     _setFire:function(db){ fire.db=db; },
     _loadAll: loadAll,
-    _loadCritical: function(){ return loadCritical(); },
+    _loadCritical: function(onPromoReady){ return loadCritical(onPromoReady); },
     _loadBackground: function(){ return loadBackground(); },
     _loadProduct: function(id){ return loadProduct(id); },
     _loadCache: function(){ return loadCache(); },
@@ -1680,7 +1687,7 @@ function renderCatalog(){
   const allSpecies=getAllSpecies();
   const featured=getCarouselHighlights();
 
-  return'<div class="fade-in">'+
+  return'<div>'+
   (DB.loadError()&&!products.length?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
     '<div class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">'+
       '<div class="flex-1"><strong><i class="fas fa-exclamation-triangle mr-1"></i> Ca&aacute;logo temporariamente indispon&iacute;vel.</strong> N&atilde;o foi poss&iacute;vel carregar os produtos cadastrados. Verifique sua conex&atilde;o e tente novamente.</div>'+
@@ -3895,7 +3902,7 @@ function savePromo(){
   _promoImage=null;
   _promoVideo=null;
   renderAdminSection();
-  if(active) setTimeout(function(){showPromoPopup()},200);
+  if(active) setTimeout(function(){showPromoPopup(true)},200);
 }
 
 function editPromo(id){
@@ -4233,11 +4240,18 @@ function promoOverlayHtml(p){
   return h;
 }
 var _promoAutoShown=false;
-function showPromoPopup(){
+var _promoDataReady=false;
+function markPromoDataReady(){
+  _promoDataReady=true;
+  showPromoPopup();
+}
+function showPromoPopup(force){
+  if(!force&&!_promoDataReady) return;
   var promos=DB.promos();
+  if(!Array.isArray(promos)) return;
   var active=promos.find(function(x){return x.active});
   if(!active) return;
-  if(_promoAutoShown) return;
+  if(_promoAutoShown&&!force) return;
   _promoAutoShown=true;
   trackEvent('promo_view',{title:active.title});
   var existing=document.getElementById('promo-popup');
@@ -4261,8 +4275,8 @@ function showPromoPopup(){
     }
   } else if(pimg){
     var ir=String(pimg);
-    if(ir.indexOf('idb:')===0) mediaHtml='<img data-idb="'+ir+'" alt="" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:contain;display:block">';
-    else mediaHtml='<img src="'+ir+'" alt="" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:contain;display:block">';
+    if(ir.indexOf('idb:')===0) mediaHtml='<img data-idb="'+ir+'" fetchpriority="high" alt="" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:contain;display:block">';
+    else mediaHtml='<img src="'+ir+'" fetchpriority="high" alt="" style="width:100%;height:auto;max-height:min(72vh,620px);object-fit:contain;display:block">';
   }
 
   var cardBody='';
@@ -5662,7 +5676,7 @@ function refreshData(showToastOnError){
     },8000);
   }
   var productId=State.view==='product'?State.productId:'';
-  return DB._loadCritical().then(function(){
+  return DB._loadCritical(markPromoDataReady).then(function(){
     if(slowTimer){clearTimeout(slowTimer);slowTimer=null;}
     DB.setLoading(false);
     if(State.view==='catalog'){
@@ -5729,25 +5743,27 @@ window.addEventListener('DOMContentLoaded', async function(){
   }
 
   if(useCache){
+    DB.setLoading(true);
     renderInitial(); // catalogo fica navegavel imediatamente a partir do cache
     try{
       ensureFirebaseApp();
       DB._setFire(firebase.firestore());
-      DB.setLoading(true);
+      markPromoDataReady();
       refreshData(false); // atualiza em background, sem travar a navegacao
     }catch(e){
       console.error('Firebase init error', e);
       DB._markLoadError('init');
       DB.setLoading(false);
+      if(useCache) markPromoDataReady();
     }
   }else{
     // Primeiro acesso: renderiza o shell (hero + skeleton) NA HORA e preenche
     // em background. A tela nunca fica presa em um spinner aguardando a rede.
+    DB.setLoading(true);
     renderInitial();
     try{
       ensureFirebaseApp();
       DB._setFire(firebase.firestore());
-      DB.setLoading(true);
       refreshData(true);
     }catch(e){
       console.error('Firebase init error', e);
@@ -5756,11 +5772,9 @@ window.addEventListener('DOMContentLoaded', async function(){
     }
   }
   initAuth();
-  setTimeout(function(){showPromoPopup();},600);
   DB._loadBackground().then(function(){
     renderCategoryNavs();
     if(State.view==='blog'||State.view==='blog-post'||State.view==='admin') render();
-    setTimeout(function(){showPromoPopup();},200);
   }).catch(function(){});
 });
 </script>
