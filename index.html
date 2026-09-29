@@ -639,6 +639,10 @@ const DB = (function(){
   // em blocos, sem travar a tela.
   const PRODUCTS_FIRST_BATCH = 22;
   const PRODUCTS_PAGE_SIZE = 500;
+  // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
+  // carrossel abrir ja completo (ate 5 slides) em vez de 1/1 enquanto o
+  // restante do catalogo termina de chegar em segundo plano.
+  const PRODUCTS_FEATURED_BATCH = 5;
   let _productsLoadGen = 0;
   let _productsComplete = false;
   const _productLoadErrors = {};
@@ -795,18 +799,53 @@ const DB = (function(){
     }catch(e){ console.error('FB reconcile legacy', e); }
   }
 
+  // Somente os produtos marcados como destaque (limite da vitrine). Consulta
+  // pequena e indexada: resolve muito antes do restante do catalogo.
+  async function _fetchFeaturedProducts(){
+    if(!fire.db) return [];
+    try{
+      const col = productsCol();
+      const snap = await col.where('featured','==',true).limit(PRODUCTS_FEATURED_BATCH).get();
+      return snap.docs.map(function(d){return d.data()});
+    }catch(e){
+      console.error('FB load featured products', e);
+      return [];
+    }
+  }
+
+  function resetProductsBaseline(){
+    Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
+    (Array.isArray(mem['products'])?mem['products']:[]).forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
+  }
+
+  // Junta os destaques com o primeiro lote da varredura paginada, sem repetir
+  // documento e sem perder a ordem por documentId usada na paginacao.
+  function mergeFeaturedOnto(firstPage, featured){
+    const seen = {};
+    const out = [];
+    featured.concat(firstPage).forEach(function(p){
+      if(!p||!p.id||seen[p.id]) return;
+      seen[p.id]=1; out.push(p);
+    });
+    return out;
+  }
+
   async function loadProducts(){
     if(!fire.db){ mem['products']=defaultFor('products'); return; }
     const gen = ++_productsLoadGen;
     _productsComplete=false;
+    // Destaques saem em paralelo ao primeiro lote do catalogo. Aguardar os dois
+    // juntos mantem a vitrine completa ja no primeiro render; o resto dos
+    // produtos continua entrando em segundo plano por _loadProductPages().
+    const featuredJob = _fetchFeaturedProducts();
     try{
       const col = productsCol();
       const first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
+      const featured = await featuredJob;
       if(_productsLoadGen!==gen) return;
       if(!first.empty){
-        mem['products'] = first.docs.map(function(d){return d.data()});
-        Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
-        mem['products'].forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
+        mem['products'] = mergeFeaturedOnto(first.docs.map(function(d){return d.data()}), featured);
+        resetProductsBaseline();
         clearProductsError();
         _loadProductPages(col, first.docs, PRODUCTS_FIRST_BATCH, gen);
         _reconcileLegacy(col, gen);
@@ -819,8 +858,7 @@ const DB = (function(){
       const data = (s.exists && s.data()) ? s.data() : {};
       if(Array.isArray(data.v) && data.v.length){
         mem['products'] = data.v;
-        Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
-        data.v.forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
+        resetProductsBaseline();
         const col = productsCol();
         let i;
         for(i=0;i<data.v.length;i+=450){
