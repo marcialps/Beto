@@ -639,7 +639,7 @@ const DB = (function(){
   // para o catalogo aparecer rapido; o restante carrega em segundo plano,
   // em blocos, sem travar a tela.
   const PRODUCTS_FIRST_BATCH = 22;
-  const PRODUCTS_PAGE_SIZE = 500;
+  const PRODUCTS_PAGE_SIZE = 50;
   // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
   // carrossel abrir ja completo (ate 5 slides) em vez de 1/1 enquanto o
   // restante do catalogo termina de chegar em segundo plano.
@@ -1417,11 +1417,11 @@ function imgFrame(src,p,i,opts){
   return '<img src="'+src+'" decoding="async"'+fp+' alt="'+(opts.alt||'')+'" '+(opts.lazy?'loading="lazy" ':'')+'style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
 }
 
-function thumbImg(src,p,i,alt){
+function thumbImg(src,p,i,alt,lazy){
   var f=focalOf(p,i);
   var style=f?'object-position:'+f.x+'% '+f.y+'%':'';
   var cls=f?'img-cover':'img-contain';
-  return '<img src="'+src+'" alt="'+alt+'" style="'+style+'" class="'+cls+'">';
+  return '<img src="'+src+'" alt="'+alt+'" '+(lazy?'loading="lazy" ':'')+'style="'+style+'" class="'+cls+'">';
 }
 
 function cartImg(item){
@@ -1472,7 +1472,7 @@ function carouselSlideForItem(item,i,total){
   return'<div class="carousel-slide" data-slide="'+i+'">'+
     '<div class="carousel-slide-inner cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
       '<div class="relative h-[480px] md:h-[520px] overflow-hidden rounded-3xl shadow-2xl bg-white">'+
-        imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'4%',fp:(i===0?'high':'low')})+
+        imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'4%',fp:(i===0?'high':'low'), lazy: i>0})+
         '<div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/10"></div>'+
         '<div class="absolute inset-x-0 bottom-0 p-7 md:p-10">'+
           '<div class="flex flex-wrap items-center gap-2 mb-3">'+
@@ -2036,7 +2036,7 @@ function renderProductDetail(id){
         '</div>'+
         '<div class="flex gap-3" id="main-thumbs">'+
           p.images.map(function(img,i){return '<button onclick="setMainImage(\''+p.id+'\','+i+')" class="w-20 h-20 rounded-xl overflow-hidden border-2 transition-colors bg-gray-100 '+(i===0?'border-green-500':'border-green-200')+'">'+
-            thumbImg(img,p,i,'Foto '+(i+1))+
+            thumbImg(img,p,i,'Foto '+(i+1),i>0)+
           '</button>'}).join('')+
         '</div>'+
       '</div>'+
