@@ -4311,13 +4311,10 @@ function promoOverlayHtml(p){
   return h;
 }
 var _promoAutoShown=false;
-var _promoDataReady=false;
 function markPromoDataReady(){
-  _promoDataReady=true;
   showPromoPopup();
 }
 function showPromoPopup(force){
-  if(!force&&!_promoDataReady) return;
   var promos=DB.promos();
   if(!Array.isArray(promos)) return;
   var active=promos.find(function(x){return x.active});
@@ -5835,6 +5832,7 @@ window.addEventListener('DOMContentLoaded', async function(){
     try{
       ensureFirebaseApp();
       DB._setFire(firebase.firestore());
+      showPromoPopup(); // tenta exibir popup ja com dados de cache/locais
       refreshData(true);
     }catch(e){
       console.error('Firebase init error', e);
