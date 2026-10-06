@@ -68,6 +68,8 @@
   @keyframes carouselBadge{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
   @keyframes carouselTitle{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:none}}
   @keyframes carouselCopy{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  @keyframes progressIndeterminate{0%{left:-40%;width:40%}50%{left:30%;width:50%}100%{left:100%;width:40%}}
+  .progress-bar-indeterminate{animation:progressIndeterminate 1.4s ease-in-out infinite}
   .img-chip{position:relative;width:88px;height:88px;border-radius:12px;overflow:hidden;border:2px solid #d1fae5;box-shadow:0 1px 4px rgba(0,0,0,.1)}
   .img-chip img{width:100%;height:100%;object-fit:cover;display:block}
   .img-chip .del-chip{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(220,38,38,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;opacity:0;transition:opacity .2s}
@@ -1834,7 +1836,7 @@ function renderCatalog(){
           (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
         '</div>':'')+
 
-        '<p class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> Carregando produtos do cat&aacute;logo...</span>':('<strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')))+'</p>'+
+         '<p class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium mb-2 block">Carregando produtos do cat&aacute;logo...</span><div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>':('<strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')))+'</p>'+
 
         (filtered.length===0?(DB.isLoading()&&!DB.loadError()?loadingCatalogGrid():
         '<div class="text-center py-20">'+
