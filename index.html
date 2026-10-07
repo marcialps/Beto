@@ -435,7 +435,7 @@ const DEFAULT_ORDERS = [
 const DB = (function(){
   const mem = {};                       // cache em memoria (espelho)
   const fire = { db: null };            // instancia do Firestore
-  const COLL = ['products','orders','customers','users','categories','promos','events','cart','news','highlights'];
+  const COLL = ['products','orders','customers','users','categories','promos','events','cart','news','highlights','testimonials'];
   const pending = {};
   const timers = {};
 
@@ -447,7 +447,7 @@ const DB = (function(){
   // Revalidacao em background a cada visita. Dados antigos sao sempre usados
   // como fallback instantaneo (inacessibilidade/lentidao nunca "apagam" o catalogo).
   const CACHE_TTL=24*60*60*1000;
-  const CRITICAL_KEYS=['categories','users','cart','promos','highlights'];
+  const CRITICAL_KEYS=['categories','users','cart','promos','highlights','testimonials'];
 
   function saveCache(){
     try{
@@ -488,6 +488,7 @@ const DB = (function(){
       case 'events':   return [];
       case 'news':     return [];
       case 'highlights':return [];
+      case 'testimonials':return [];
       case 'cart':     return [];
       case 'currentUser': return null;
       case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'featured'};
@@ -1021,6 +1022,8 @@ const DB = (function(){
     setEvents(v){ mem['events']=v; persist('events'); return true; },
     news(){return this.g('news')||[]},
     setNews(v){ mem['news']=v; persist('news'); return true; },
+    testimonials(){return this.g('testimonials')||[]},
+    setTestimonials(v){ mem['testimonials']=v; persist('testimonials'); return true; },
     categories(){return this.g('categories')},
     setCategories(v){ mem['categories']=v; persist('categories'); return true; },
     _markLoadError:function(v){ mem['_loadError']=v||true; return true; },
@@ -2776,6 +2779,173 @@ function renderBlogPost(id){
 }
 
 // ============================================================
+// VIEW: SOBRE - DEPOIMENTOS (avaliacoes enviadas pelo publico)
+// ============================================================
+// Mensagens chegam com status 'pendente' e so aparecem no site
+// depois de aprovadas no painel administrador (menu Depoimentos).
+var RATING_LABELS={1:'P\u00e9ssimo',2:'Ruim',3:'Bom',4:'\u00d3timo',5:'Excelente'};
+var TESTI_AVATAR_BGS=['from-green-600 to-emerald-700','from-amber-500 to-amber-600','from-emerald-600 to-teal-700','from-green-700 to-green-900','from-amber-600 to-orange-600'];
+
+function testimonialInitials(name){
+  var p=String(name||'').trim().split(/\s+/);
+  var a=p[0]?p[0].charAt(0):'';
+  var b=p.length>1?p[p.length-1].charAt(0):'';
+  return((a+b).toUpperCase())||'?';
+}
+function testimonialAvatarBg(name){
+  var s=String(name||''),n=0;
+  for(var i=0;i<s.length;i++) n+=s.charCodeAt(i);
+  return TESTI_AVATAR_BGS[n%TESTI_AVATAR_BGS.length];
+}
+function testimonialDate(d){
+  try{ return new Date(d).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}); }
+  catch(e){ return formatDate(d); }
+}
+function approvedTestimonials(){
+  return (DB.testimonials()||[]).filter(function(t){return t&&t.status==='aprovado'&&t.text});
+}
+function testimonialRatingPicker(v){
+  var out='';
+  for(var i=1;i<=5;i++){
+    out+='<button type="button" onclick="setTestimonialRating('+i+')" title="'+RATING_LABELS[i]+'"'+
+      ' class="w-9 h-9 rounded-lg flex items-center justify-center transition-all hover:bg-amber-50">'+
+      '<i class="fas fa-star text-lg '+(i<=v?'text-amber-400':'text-gray-300')+'"></i></button>';
+  }
+  return out;
+}
+function setTestimonialRating(v){
+  v=Math.max(1,Math.min(5,parseInt(v,10)||5));
+  var h=document.getElementById('dep-rating'); if(h) h.value=v;
+  var s=document.getElementById('dep-stars'); if(s) s.innerHTML=testimonialRatingPicker(v);
+  var l=document.getElementById('dep-rating-label'); if(l) l.textContent=RATING_LABELS[v]||'';
+}
+function testimonialCounter(){
+  var t=document.getElementById('dep-text'),c=document.getElementById('dep-count');
+  if(t&&c) c.textContent=t.value.length;
+}
+function submitTestimonial(){
+  var nameEl=document.getElementById('dep-name');
+  var cityEl=document.getElementById('dep-city');
+  var textEl=document.getElementById('dep-text');
+  var rateEl=document.getElementById('dep-rating');
+  if(!nameEl||!textEl) return;
+  var name=nameEl.value.trim();
+  var city=cityEl?cityEl.value.trim():'';
+  var text=textEl.value.trim();
+  var rating=Math.max(1,Math.min(5,parseInt(rateEl?rateEl.value:5,10)||5));
+  if(name.length<2){showToast('Informe seu nome para enviar o depoimento','warn');nameEl.focus();return}
+  if(text.length<10){showToast('Escreva uma mensagem com pelo menos 10 caracteres','warn');textEl.focus();return}
+  var list=DB.testimonials()||[];
+  list.unshift({
+    id:'t'+genId(),
+    name:name.slice(0,60),
+    city:city.slice(0,60),
+    rating:rating,
+    text:text.slice(0,600),
+    status:'pendente',
+    createdAt:new Date().toISOString()
+  });
+  DB.setTestimonials(list);
+  trackEvent('testimonial',{name:name,rating:rating});
+  showToast('Depoimento enviado! Ser\u00e1 publicado ap\u00f3s aprova\u00e7\u00e3o da equipe.','success');
+  var sec=document.getElementById('about-testimonials');
+  if(sec) sec.innerHTML=renderTestimonialsSection();
+}
+function renderTestimonialsSection(){
+  var approved=approvedTestimonials().slice().sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
+  var avg=0;
+  if(approved.length){
+    var sum=0;
+    approved.forEach(function(t){sum+=Number(t.rating)||0});
+    avg=sum/approved.length;
+  }
+  var board='';
+  if(approved.length){
+    board='<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">'+
+      approved.map(function(t){
+        return '<article class="relative bg-white rounded-2xl p-5 shadow-sm border border-green-100 hover:shadow-md transition-shadow overflow-hidden">'+
+          '<div class="absolute -top-4 -right-1 text-7xl leading-none text-green-50 font-serif select-none pointer-events-none">&ldquo;</div>'+
+          '<div class="relative flex items-center justify-between mb-2.5">'+
+            '<div class="flex gap-0.5">'+stars(t.rating)+'</div>'+
+            '<span class="text-[11px] font-medium text-gray-300">'+testimonialDate(t.createdAt)+'</span>'+
+          '</div>'+
+          '<p class="relative text-sm text-gray-600 leading-relaxed mb-4 whitespace-pre-line">"'+esc(t.text)+'"</p>'+
+          '<div class="relative flex items-center gap-3 pt-3 border-t border-gray-100">'+
+            '<div class="w-10 h-10 rounded-full bg-gradient-to-br '+testimonialAvatarBg(t.name)+' text-white flex items-center justify-center text-[11px] font-bold flex-shrink-0">'+testimonialInitials(t.name)+'</div>'+
+            '<div class="min-w-0">'+
+              '<div class="text-sm font-bold text-gray-900 truncate flex items-center gap-1.5">'+esc(t.name)+'<i class="fas fa-circle-check text-green-500 text-[11px] flex-shrink-0" title="Depoimento verificado"></i></div>'+
+              '<div class="text-xs text-gray-400 truncate">'+(t.city?esc(t.city):'Cliente Agrovel')+'</div>'+
+            '</div>'+
+          '</div>'+
+        '</article>';
+      }).join('')+
+    '</div>';
+  } else {
+    board='<div class="bg-white rounded-2xl border border-dashed border-green-200 p-10 text-center">'+
+      '<div class="w-14 h-14 bg-green-100 rounded-2xl flex items-center justify-center text-green-600 mx-auto mb-4 text-2xl"><i class="fas fa-comment-dots"></i></div>'+
+      '<h3 class="font-bold text-gray-800 mb-1">Seja o primeiro a deixar um depoimento</h3>'+
+      '<p class="text-sm text-gray-500 max-w-sm mx-auto leading-relaxed">Conte como foi a sua experi&ecirc;ncia com a Agrovel. Assim que sua mensagem for aprovada, ela aparece aqui.</p>'+
+    '</div>';
+  }
+  var summary='';
+  if(approved.length){
+    summary='<div class="inline-flex items-center gap-4 bg-white border border-green-100 rounded-2xl px-5 py-3 shadow-sm mt-6">'+
+      '<div class="text-3xl font-extrabold text-gray-900 leading-none">'+avg.toFixed(1).replace('.',',')+'</div>'+
+      '<div class="text-left">'+
+        '<div class="flex gap-0.5 mb-1">'+stars(avg)+'</div>'+
+        '<div class="text-xs text-gray-400">M&eacute;dia de '+approved.length+' depoimento'+(approved.length>1?'s':'')+' aprovado'+(approved.length>1?'s':'')+'</div>'+
+      '</div>'+
+      '<div class="w-px h-10 bg-green-100"></div>'+
+      '<div class="text-xs text-gray-500 leading-snug max-w-[10rem]"><i class="fas fa-shield-alt text-green-600 mr-1"></i>Mensagens moderadas antes de serem publicadas.</div>'+
+    '</div>';
+  }
+  var formHtml='<div class="bg-white rounded-2xl border border-green-100 shadow-sm overflow-hidden lg:sticky lg:top-24">'+
+    '<div class="bg-gradient-to-r from-green-900 to-emerald-800 px-5 py-4 text-white">'+
+      '<h3 class="font-bold text-base flex items-center gap-2"><i class="fas fa-pen-nib text-amber-400"></i>Deixe seu depoimento</h3>'+
+      '<p class="text-green-200 text-xs mt-1 leading-relaxed"><i class="fas fa-shield-alt mr-1"></i>Sua mensagem &eacute; revisada pela equipe antes de aparecer no site.</p>'+
+    '</div>'+
+    '<div class="p-5 space-y-4">'+
+      '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">'+
+        '<div><label class="text-sm text-gray-600 mb-1.5 block" for="dep-name">Seu nome *</label>'+
+          '<input id="dep-name" type="text" maxlength="60" autocomplete="name" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none text-sm" placeholder="Como devemos chamar voc&ecirc;"></div>'+
+        '<div><label class="text-sm text-gray-600 mb-1.5 block" for="dep-city">Cidade</label>'+
+          '<input id="dep-city" type="text" maxlength="60" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none text-sm" placeholder="Ex: Iju&iacute; - RS"></div>'+
+      '</div>'+
+      '<div>'+
+        '<label class="text-sm text-gray-600 mb-1.5 block">Sua nota</label>'+
+        '<div class="flex items-center gap-3">'+
+          '<div id="dep-stars" class="flex items-center gap-1.5">'+testimonialRatingPicker(5)+'</div>'+
+          '<span id="dep-rating-label" class="text-xs font-bold text-green-700">'+RATING_LABELS[5]+'</span>'+
+        '</div>'+
+        '<input type="hidden" id="dep-rating" value="5">'+
+      '</div>'+
+      '<div>'+
+        '<label class="text-sm text-gray-600 mb-1.5 block" for="dep-text">Sua mensagem *</label>'+
+        '<textarea id="dep-text" rows="4" maxlength="600" oninput="testimonialCounter()" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none text-sm resize-none" placeholder="Conte como foi seu atendimento, a qualidade dos produtos ou o atendimento da equipe..."></textarea>'+
+        '<div class="text-right text-xs text-gray-400 mt-1"><span id="dep-count">0</span>/600</div>'+
+      '</div>'+
+      '<button onclick="submitTestimonial()" class="w-full bg-amber-500 hover:bg-amber-400 text-green-950 font-bold py-3.5 rounded-xl transition-colors flex items-center justify-center gap-2 shadow-sm"><i class="fas fa-paper-plane"></i>Enviar depoimento</button>'+
+    '</div>'+
+  '</div>';
+  return '<div class="text-center mb-8">'+
+      '<div class="inline-flex items-center gap-2 bg-amber-500 text-green-950 px-4 py-1.5 rounded-full text-sm font-bold mb-4 shadow"><i class="fas fa-comment-dots"></i> Depoimentos</div>'+
+      '<h2 class="text-2xl md:text-4xl font-bold text-gray-900 mb-3">O que nossos clientes <span class="text-green-700">dizem</span></h2>'+
+      '<p class="text-gray-600 max-w-2xl mx-auto text-sm md:text-base leading-relaxed">Mensagens reais de quem confia na Agrovel. Avalie o atendimento e deixe a sua experi&ecirc;ncia tamb&eacute;m.</p>'+
+      summary+
+    '</div>'+
+    '<div class="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">'+
+      '<div class="lg:col-span-3">'+
+        '<div class="flex items-center justify-between mb-4">'+
+          '<h3 class="font-bold text-gray-900 flex items-center gap-2"><i class="fas fa-award text-amber-500"></i>Experi&ecirc;ncias reais</h3>'+
+          '<span class="text-xs font-medium text-gray-400 bg-white border border-green-100 px-3 py-1.5 rounded-full">'+approved.length+' publicado'+(approved.length===1?'':'s')+'</span>'+
+        '</div>'+
+        board+
+      '</div>'+
+      '<div class="lg:col-span-2">'+formHtml+'</div>'+
+    '</div>';
+}
+
+// ============================================================
 // VIEW: SOBRE
 // ============================================================
 function renderAbout(){
@@ -2847,6 +3017,7 @@ function renderAbout(){
         '<a href="https://wa.me/'+getWhatsAppNumber()+'?text='+encodeURIComponent('Olá! Quero saber mais sobre a Agrovel.')+'" target="_blank" rel="noopener" class="inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-3 rounded-xl transition-colors"><i class="fab fa-whatsapp"></i>Falar com a Agrovel</a>'+
       '</div>'+
     '</section>'+
+    '<section id="about-testimonials" class="mb-12">'+renderTestimonialsSection()+'</section>'+
     '<section class="rounded-3xl bg-gradient-to-r from-green-900 to-emerald-800 p-8 md:p-12 text-center text-white">'+
       '<h2 class="text-2xl md:text-3xl font-extrabold mb-3">Vamos conversar?</h2>'+
       '<p class="text-green-200 max-w-xl mx-auto mb-6">Visite nossa loja, acompanhe o <button onclick="navigate(\'blog\')" class="text-amber-400 font-bold underline hover:text-amber-300">AGROVEL Informa</button> e fique por dentro das novidades do agroneg&oacute;cio.</p>'+
@@ -2874,6 +3045,7 @@ function renderAdmin(){
     {id:'highlights',icon:'fa-star',label:'Destaques',role:'admin'},
     {id:'copilot',icon:'fa-robot',label:'Copilot IA',role:'admin'},
     {id:'whatsapp',icon:'fab fa-whatsapp',label:'WhatsApp',role:'admin'},
+    {id:'testimonials',icon:'fa-comment-dots',label:'Depoimentos',role:'admin'},
     {id:'news',icon:'fa-newspaper',label:'Not\u00edcias',role:'admin'},
   ].filter(function(n){return n.role==='both'||(isAdm&&n.role==='admin')||(isSel&&n.role==='both')});
   return'<div class="flex h-screen bg-gray-50" id="admin-wrap">'+
@@ -2887,9 +3059,15 @@ function renderAdmin(){
         '<button onclick="closeAdminSidebar()" class="md:hidden text-green-400 hover:text-white text-lg"><i class="fas fa-times"></i></button>'+
       '</div>'+
       '<nav class="flex-1 p-3 space-y-1 overflow-y-auto">'+
-        navItems.map(function(n){return '<div onclick="switchAdminSection(\''+n.id+'\');closeAdminSidebar()" id="nav-'+n.id+'"'+
-          'class="admin-link'+(State.adminSection===n.id?' bg-green-800 text-white':'')+'">'+
-          '<i class="fas '+n.icon+' w-5 text-center"></i><span>'+n.label+'</span>'+
+        navItems.map(function(n){
+          var badge='';
+          if(n.id==='testimonials'){
+            var pendCount=(DB.testimonials()||[]).filter(function(x){return x&&x.status==='pendente'}).length;
+            if(pendCount>0) badge='<span class="ml-auto bg-amber-500 text-green-950 text-[11px] font-bold px-2 py-0.5 rounded-full">'+pendCount+'</span>';
+          }
+          return '<div onclick="switchAdminSection(\''+n.id+'\');closeAdminSidebar()" id="nav-'+n.id+'"'+
+          ' class="admin-link'+(State.adminSection===n.id?' bg-green-800 text-white':'')+'">'+
+          '<i class="fas '+n.icon+' w-5 text-center"></i><span>'+n.label+'</span>'+badge+
         '</div>'}).join('')+
       '</nav>'+
       '<div class="p-4 border-t border-green-800 sidebar-user-section">'+
@@ -3009,6 +3187,7 @@ function renderAdminSection(){
     case 'whatsapp':el.innerHTML=renderAdminWhatsApp();break;
     case 'news':el.innerHTML=renderAdminNews();resolveIdbMedia(el);break;
     case 'news-form':el.innerHTML=renderNewsForm(State.editNewsId);initNewsForm(State.editNewsId);resolveIdbMedia(el);break;
+    case 'testimonials':el.innerHTML=renderAdminTestimonials();break;
   }
   document.querySelectorAll('.admin-link').forEach(function(el){
     const key=el.id?el.id.replace('nav-',''):'';
@@ -4754,6 +4933,106 @@ function deleteNews(id){
 // ============================================================
 // NEWS RICH EDITOR (Conte\u00fado da Not\u00edcia)
 // ============================================================
+// ============================================================
+// ADMIN: DEPOIMENTOS (moderacao das mensagens enviadas pelo site)
+// ============================================================
+var _testiFilter='todos';
+function setTestiFilter(f){ _testiFilter=f; renderAdminSection(); }
+function testimonialStatusBadge(s){
+  var c={aprovado:'bg-green-100 text-green-700',pendente:'bg-amber-100 text-amber-700',rejeitado:'bg-red-100 text-red-700'};
+  var l={aprovado:'Publicado',pendente:'Aguardando',rejeitado:'Oculto'};
+  return '<span class="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap '+(c[s]||'bg-gray-100 text-gray-600')+'">'+(l[s]||esc(s))+'</span>';
+}
+function testimonialStatCard(icon,label,value,color){
+  return '<div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 flex items-center gap-3">'+
+    '<div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 '+color+'"><i class="fas '+icon+'"></i></div>'+
+    '<div><div class="text-xl font-extrabold text-gray-900 leading-none">'+value+'</div>'+
+    '<div class="text-xs text-gray-500 mt-1">'+label+'</div></div>'+
+  '</div>';
+}
+function renderAdminTestimonials(){
+  var list=DB.testimonials()||[];
+  var pend=list.filter(function(t){return t.status==='pendente'}).length;
+  var aprov=list.filter(function(t){return t.status==='aprovado'}).length;
+  var rej=list.filter(function(t){return t.status==='rejeitado'}).length;
+  var filtered=list.filter(function(t){return _testiFilter==='todos'||t.status===_testiFilter});
+  var order={pendente:0,aprovado:1,rejeitado:2};
+  filtered=filtered.slice().sort(function(a,b){
+    var oa=order[a.status]===undefined?3:order[a.status];
+    var ob=order[b.status]===undefined?3:order[b.status];
+    if(oa!==ob) return oa-ob;
+    return new Date(b.createdAt)-new Date(a.createdAt);
+  });
+  var tabs=[['todos','Todos',list.length],['pendente','Aguardando',pend],['aprovado','Publicados',aprov],['rejeitado','Ocultos',rej]];
+  var body='';
+  if(filtered.length){
+    body='<div class="grid grid-cols-1 lg:grid-cols-2 gap-4">'+filtered.map(function(t){
+      return '<div class="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 flex flex-col'+(t.status==='pendente'?' border-l-4 border-l-amber-400':'')+'">'+
+        '<div class="flex items-start justify-between gap-3 mb-3">'+
+          '<div class="flex items-center gap-3 min-w-0">'+
+            '<div class="w-10 h-10 rounded-full bg-gradient-to-br '+testimonialAvatarBg(t.name)+' text-white flex items-center justify-center text-[11px] font-bold flex-shrink-0">'+testimonialInitials(t.name)+'</div>'+
+            '<div class="min-w-0">'+
+              '<div class="font-bold text-gray-900 text-sm truncate">'+esc(t.name)+'</div>'+
+              '<div class="text-xs text-gray-400 truncate">'+(t.city?esc(t.city)+' &bull; ':'')+testimonialDate(t.createdAt)+'</div>'+
+            '</div>'+
+          '</div>'+
+          testimonialStatusBadge(t.status)+
+        '</div>'+
+        '<div class="flex items-center gap-1 mb-2">'+stars(t.rating)+'<span class="text-xs text-gray-400 ml-1.5">'+(t.rating||0)+'/5</span></div>'+
+        '<p class="text-sm text-gray-600 leading-relaxed flex-1 whitespace-pre-line bg-gray-50 border border-gray-100 rounded-xl p-3.5">"'+esc(t.text)+'"</p>'+
+        (t.status==='aprovado'?'<div class="text-xs text-green-600 font-medium mt-3"><i class="fas fa-globe mr-1"></i>Vis&iacute;vel no site</div>':(t.status==='pendente'?'<div class="text-xs text-amber-600 font-medium mt-3"><i class="fas fa-clock mr-1"></i>Aguardando sua aprova&ccedil;&atilde;o</div>':'<div class="text-xs text-red-500 font-medium mt-3"><i class="fas fa-eye-slash mr-1"></i>N&atilde;o exibido no site</div>'))+
+        '<div class="flex items-center gap-2 mt-4 pt-4 border-t border-gray-50">'+
+          (t.status!=='aprovado'?'<button onclick="setTestimonialStatus(\''+t.id+'\',\'aprovado\')" class="flex-1 bg-green-600 hover:bg-green-500 text-white text-xs font-bold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5"><i class="fas fa-check"></i>'+(t.status==='pendente'?'Aprovar':'Publicar')+'</button>':'')+
+          (t.status!=='rejeitado'?'<button onclick="setTestimonialStatus(\''+t.id+'\',\'rejeitado\')" class="flex-1 bg-white border border-red-200 hover:bg-red-50 text-red-600 text-xs font-bold py-2.5 rounded-xl transition-colors flex items-center justify-center gap-1.5"><i class="fas fa-eye-slash"></i>'+(t.status==='pendente'?'Rejeitar':'Ocultar')+'</button>':'')+
+          '<button onclick="deleteTestimonial(\''+t.id+'\')" title="Excluir definitivamente" class="w-10 h-[38px] flex-shrink-0 flex items-center justify-center border border-gray-200 text-gray-400 hover:text-red-600 hover:border-red-200 hover:bg-red-50 rounded-xl transition-colors"><i class="fas fa-trash text-sm"></i></button>'+
+        '</div>'+
+      '</div>';
+    }).join('')+'</div>';
+  } else {
+    body='<div class="bg-white rounded-2xl border border-gray-100 p-10 text-center">'+
+      '<div class="text-5xl text-gray-200 mb-3"><i class="fas fa-comments"></i></div>'+
+      '<p class="text-gray-400">'+(_testiFilter==='todos'?'Nenhum depoimento recebido at&eacute; o momento.':'Nenhum depoimento neste filtro.')+'</p>'+
+    '</div>';
+  }
+  return '<div class="p-4 md:p-8 fade-in">'+
+    '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900 flex items-center gap-2"><i class="fas fa-comment-dots text-green-600"></i>Depoimentos</h1>'+
+      '<p class="text-gray-400 text-sm">Aprove as mensagens dos clientes para exibi-las na p&aacute;gina Sobre</p></div>'+
+      '<button onclick="navigate(\'about\')" class="bg-white hover:bg-green-50 text-green-700 border border-green-200 font-bold px-5 py-2.5 rounded-xl transition-colors flex items-center gap-2 text-sm"><i class="fas fa-external-link-alt"></i>Ver no site</button>'+
+    '</div>'+
+    '<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">'+
+      testimonialStatCard('fa-hourglass-half','Aguardando',pend,'bg-amber-100 text-amber-600')+
+      testimonialStatCard('fa-circle-check','Publicados',aprov,'bg-green-100 text-green-600')+
+      testimonialStatCard('fa-eye-slash','Ocultos',rej,'bg-red-100 text-red-500')+
+      testimonialStatCard('fa-comments','Total recebido',list.length,'bg-gray-100 text-gray-500')+
+    '</div>'+
+    '<div class="flex flex-wrap gap-2 mb-6">'+
+      tabs.map(function(t){
+        return '<button onclick="setTestiFilter(\''+t[0]+'\')" class="px-4 py-2 rounded-xl text-sm font-medium transition-colors '+
+          (_testiFilter===t[0]?'bg-green-600 text-white shadow-sm':'bg-white text-gray-600 border border-gray-200 hover:border-green-300')+'">'+
+          t[1]+' <span class="'+(_testiFilter===t[0]?'text-green-100':'text-gray-400')+'">'+t[2]+'</span></button>';
+      }).join('')+
+    '</div>'+
+    body+
+  '</div>';
+}
+function setTestimonialStatus(id,status){
+  var list=DB.testimonials()||[];
+  var t=list.filter(function(x){return x&&x.id===id})[0];
+  if(!t) return;
+  t.status=status;
+  DB.setTestimonials(list);
+  render();
+  showToast(status==='aprovado'?'Depoimento aprovado e j&aacute; vis&iacute;vel no site!':'Depoimento ocultado do site',status==='aprovado'?'success':'info');
+}
+function deleteTestimonial(id){
+  if(!confirm('Tem certeza que deseja excluir este depoimento? Esta a\u00e7\u00e3o n\u00e3o pode ser desfeita.')) return;
+  var list=(DB.testimonials()||[]).filter(function(x){return x&&x.id!==id});
+  DB.setTestimonials(list);
+  render();
+  showToast('Depoimento exclu\u00eddo','warn');
+}
+
 var _newsHtmlMode=false;
 
 function newsTbBtn(label,title,onclick,extra){
