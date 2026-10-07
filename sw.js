@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agrovel-v3';
+const CACHE_NAME = 'agrovel-v4';
 const STATIC_ASSETS = [
   '/',
   '/index.html',

@@ -427,6 +427,24 @@ const DEFAULT_ORDERS = [
 */
 
 // ============================================================
+// ORDEM ALFABETICA DO CATALOGO
+// Comparador usado tanto na tela quanto para conferir a ordem de chegada
+// dos produtos. Ele replica a ordenacao do Firestore (ordem de codigo de
+// caractere, com desempate pelo id do documento), para que a lista exibida
+// seja exatamente a ordem em que os lotes sao buscados. Assim um lote novo
+// so entra no FIM da grade e os cards ja na tela nunca trocam de lugar.
+// ============================================================
+function compareByName(a,b){
+  var an=(a&&a.name!=null)?String(a.name):'';
+  var bn=(b&&b.name!=null)?String(b.name):'';
+  if(an!==bn) return an<bn?-1:1;
+  var ai=(a&&a.id!=null)?String(a.id):'';
+  var bi=(b&&b.id!=null)?String(b.id):'';
+  if(ai===bi) return 0;
+  return ai<bi?-1:1;
+}
+
+// ============================================================
 // DB - Google Firebase (Firestore)
 // Dados de informacoes e referencias persistidos no Firestore.
 // Os uploads de midia/imagens continuam sendo salvos nas pastas
@@ -491,7 +509,7 @@ const DB = (function(){
       case 'testimonials':return [];
       case 'cart':     return [];
       case 'currentUser': return null;
-      case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'featured'};
+      case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'alpha'};
     }
     return null;
   }
@@ -641,14 +659,19 @@ const DB = (function(){
   // Leitura paginada no Firestore: a primeira carga traz um lote pequeno
   // para o catalogo aparecer rapido; o restante carrega em segundo plano,
   // em blocos, sem travar a tela.
+  // A busca e SEMPRE feita por ordem de nome (ordem alfabetica), igual a
+  // ordem de exibicao do catalogo: assim cada lote novo so acrescenta itens
+  // no FIM da lista ja visivel e nada pula/muda de lugar na tela do usuario.
   const PRODUCTS_FIRST_BATCH = 22;
   const PRODUCTS_PAGE_SIZE = 50;
   // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
-  // carrossel abrir ja completo (ate 5 slides) em vez de 1/1 enquanto o
-  // restante do catalogo termina de chegar em segundo plano.
+  // carrossel abrir ja completo (ate 5 slides) em vez de 1/5 enquanto o
+  // restante do catalogo termina de chegar em segundo plano. Fica FORA de
+  // mem['products'] para nao quebrar a ordem alfabetica do catalogo.
   const PRODUCTS_FEATURED_BATCH = 5;
   let _productsLoadGen = 0;
   let _productsComplete = false;
+  let _featuredProducts = [];
   const _productLoadErrors = {};
 
   function appendProducts(arr){
@@ -738,7 +761,11 @@ const DB = (function(){
     }catch(e){ console.error('FB load products_meta', e); }
   }
 
-  async function _loadProductPages(col, firstDocs, firstLimit, gen){
+  // Lista fria do catalogo: busca os proximos blocos em ordem alfabetica,
+  // um apos o outro, em segundo plano. Como a ordem de busca e a mesma de
+  // exibicao, cada bloco apenas acrescenta no fim da lista - quem esta
+  // navegando nao ve nada mudar enquanto o restante do catalogo chega.
+  async function _loadProductPages(col, firstDocs, firstLimit, gen, byName){
     try{
       var last = firstDocs[firstDocs.length-1];
       if(last){
@@ -747,7 +774,9 @@ const DB = (function(){
         while(pageCount===limit){
           if(_productsLoadGen!==gen) return;
           limit = PRODUCTS_PAGE_SIZE;
-          const q = col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit);
+          const q = byName
+            ? col.orderBy('name').startAfter(last).limit(limit)
+            : col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit);
           const snap = await q.get();
           if(_productsLoadGen!==gen) return;
           if(snap.empty) break;
@@ -806,16 +835,22 @@ const DB = (function(){
   }
 
   // Somente os produtos marcados como destaque (limite da vitrine). Consulta
-  // pequena e indexada: resolve muito antes do restante do catalogo.
-  async function _fetchFeaturedProducts(){
-    if(!fire.db) return [];
+  // pequena e indexada: resolve muito antes do restante do catalogo. Fica em
+  // um buffer proprio (fora de mem['products']) para o carrossel abrir completo
+  // sem baguncar a ordem alfabetica da grade.
+  async function _fetchFeaturedProducts(gen){
+    _featuredProducts = [];
+    if(!fire.db) return;
     try{
       const col = productsCol();
       const snap = await col.where('featured','==',true).limit(PRODUCTS_FEATURED_BATCH).get();
-      return snap.docs.map(function(d){return d.data()});
+      if(_productsLoadGen!==gen) return;
+      const list = snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id});
+      list.sort(compareByName);
+      _featuredProducts = list;
+      try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
     }catch(e){
       console.error('FB load featured products', e);
-      return [];
     }
   }
 
@@ -824,36 +859,32 @@ const DB = (function(){
     (Array.isArray(mem['products'])?mem['products']:[]).forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
   }
 
-  // Junta os destaques com o primeiro lote da varredura paginada, sem repetir
-  // documento e sem perder a ordem por documentId usada na paginacao.
-  function mergeFeaturedOnto(firstPage, featured){
-    const seen = {};
-    const out = [];
-    featured.concat(firstPage).forEach(function(p){
-      if(!p||!p.id||seen[p.id]) return;
-      seen[p.id]=1; out.push(p);
-    });
-    return out;
-  }
-
   async function loadProducts(){
     if(!fire.db){ mem['products']=defaultFor('products'); return; }
     const gen = ++_productsLoadGen;
     _productsComplete=false;
-    // Destaques saem em paralelo ao primeiro lote do catalogo. Aguardar os dois
-    // juntos mantem a vitrine completa ja no primeiro render; o resto dos
-    // produtos continua entrando em segundo plano por _loadProductPages().
-    const featuredJob = _fetchFeaturedProducts();
+    // Destaques saem em paralelo ao primeiro lote do catalogo: o carrossel
+    // fica completo ja no primeiro render, enquanto a grade comeca pela
+    // letra A e vai recebendo o resto em ordem alfabetica.
+    const featuredJob = _fetchFeaturedProducts(gen);
     try{
       const col = productsCol();
-      const first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
-      const featured = await featuredJob;
+      var byName = true;
+      var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
+      if(first.empty){
+        // Salvaguarda: documento sem o campo "name" nao entra na ordenacao
+        // por nome. Se nenhum veio, varre o catalogo por documentId para a
+        // pagina nao ficar vazia.
+        first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
+        byName = false;
+      }
+      await featuredJob;
       if(_productsLoadGen!==gen) return;
       if(!first.empty){
-        mem['products'] = mergeFeaturedOnto(first.docs.map(function(d){return d.data()}), featured);
+        mem['products'] = first.docs.map(function(d){return d.data()});
         resetProductsBaseline();
         clearProductsError();
-        _loadProductPages(col, first.docs, PRODUCTS_FIRST_BATCH, gen);
+        _loadProductPages(col, first.docs, PRODUCTS_FIRST_BATCH, gen, byName);
         _reconcileLegacy(col, gen);
         return;
       }
@@ -971,6 +1002,9 @@ const DB = (function(){
     s(key,val){ mem[key]=val; persist(key); return true; },
 
     products(){return this.g('products')||[]},
+    // Buffer proprio com os produtos em destaque (busca dedicada). Exibido no
+    // carrossel sem precisar que o catalogo esteja completo.
+    featuredProducts(){ return _featuredProducts; },
     productsMeta(){
       const m=mem['products_meta'];
       if(m&&typeof m.total==='number') return m;
@@ -1003,15 +1037,27 @@ const DB = (function(){
       return true;
     },
     filters(){
-      var def={category:'',species:'',brand:'',search:'',sort:'featured'};
+      // Padrao do catalogo: ordem alfabetica.
+      var def={category:'',species:'',brand:'',search:'',sort:'alpha'};
       try{
         var raw=localStorage.getItem('agrovel_filters');
-        if(raw) return Object.assign({},def,JSON.parse(raw));
+        if(raw){
+          var f=Object.assign({},def,JSON.parse(raw));
+          // Migracao unica: "Destaques" era o padrao antigo. Quem nunca
+          // escolheu outra ordem passa a abrir em ordem alfabetica; quem ja
+          // escolheu depois da migracao mantem a escolha.
+          if(localStorage.getItem('agrovel_sort_migrated')!=='1'){
+            if(!f.sort||f.sort==='featured') f.sort='alpha';
+            try{ localStorage.setItem('agrovel_filters', JSON.stringify(f)); }catch(e){}
+            localStorage.setItem('agrovel_sort_migrated','1');
+          }
+          return f;
+        }
       }catch(e){}
       return def;
     },
     setFilters(v){
-      try{ localStorage.setItem('agrovel_filters', JSON.stringify(v||{category:'',species:'',brand:'',search:'',sort:'featured'})); }catch(e){}
+      try{ localStorage.setItem('agrovel_filters', JSON.stringify(v||{category:'',species:'',brand:'',search:'',sort:'alpha'})); }catch(e){}
       return true;
     },
     promos(){return this.g('promos')||[]},
@@ -1252,13 +1298,13 @@ function buildNavHash(){
   if(f.species) parts.push('sp='+encodeURIComponent(f.species));
   if(f.brand) parts.push('b='+encodeURIComponent(f.brand));
   if(f.search) parts.push('q='+encodeURIComponent(f.search));
-  if(f.sort&&f.sort!=='featured') parts.push('o='+encodeURIComponent(f.sort));
+  if(f.sort&&f.sort!=='alpha') parts.push('o='+encodeURIComponent(f.sort));
   return '#'+parts.join('&');
 }
 
 function parseNavHash(){
   var h=(location.hash||'').replace(/^#/,'');
-  var noFilters={category:'',species:'',brand:'',search:'',sort:'featured'};
+  var noFilters={category:'',species:'',brand:'',search:'',sort:'alpha'};
   if(!h) return null;
   if(h.indexOf('post=')===0) return {state:{view:'blog-post',newsId:decodeURIComponent(h.slice(5))},filters:noFilters};
   var p={};
@@ -1277,7 +1323,7 @@ function parseNavHash(){
     if(p.bs!==undefined) st.blogSearch=p.bs||'';
   }
   if(p.v==='confirmation'&&p.id) st.orderId=p.id;
-  return {state:st,filters:{category:p.c||'',species:p.sp||'',brand:p.b||'',search:p.q||'',sort:p.o||'featured'}};
+  return {state:st,filters:{category:p.c||'',species:p.sp||'',brand:p.b||'',search:p.q||'',sort:p.o||'alpha'}};
 }
 
 function applyNavState(parsed,opts){
@@ -1327,7 +1373,7 @@ window.addEventListener('popstate',function(){
   else _appNavDepth=0;
   var parsed=parseNavHash();
   if(parsed) applyNavState(parsed);
-  else applyNavState({state:{view:'catalog'},filters:{category:'',species:'',brand:'',search:'',sort:'featured'}});
+  else applyNavState({state:{view:'catalog'},filters:{category:'',species:'',brand:'',search:'',sort:'alpha'}});
 });
 
 function render(){
@@ -1338,7 +1384,7 @@ function render(){
   renderCartBadge();
   const mc=document.getElementById('main-content');
   switch(State.view){
-    case 'catalog':mc.innerHTML=renderCatalog();featInit();break;
+    case 'catalog':mc.innerHTML=renderCatalog();markCatalogGridSynced();featInit();break;
     case 'product':mc.innerHTML=renderProductDetail(State.productId);break;
     case 'cart':mc.innerHTML=renderCartPage();break;
     case 'checkout':mc.innerHTML=renderCheckout();break;
@@ -1439,11 +1485,39 @@ function cartImg(item){
 }
 
 function getCarouselHighlights(){
-  var products=DB.products().filter(function(p){return p&&p.active&&p.featured}).slice(0,5);
-  var camps=(DB.highlights()||[]).filter(function(h){return h&&h.active});
+  var seen={}, products=[], byId={};
+  DB.products().forEach(function(p){ if(p&&p.id) byId[p.id]=p; });
+  function add(p){
+    if(!p||!p.id||!p.active||!p.featured||seen[p.id]) return;
+    seen[p.id]=1; products.push(p);
+  }
+  // Buffer proprio dos destaques (busca dedicada) abre o carrossel ja
+  // completo, mesmo que o catalogo ainda esteja carregando em lotes. Quando o
+  // produto ja esta no catalogo local, vale a versao local: ela reflete alteracoes
+  // feitas no painel depois que o buffer foi montado (ligar/desligar destaque).
+  try{ DB.featuredProducts().forEach(function(p){ add(byId[p.id]||p); }); }catch(e){}
+  DB.products().forEach(add);
+  products=products.slice(0,5);
   var items=products.map(function(p){return{type:'product',p:p}});
+  var camps=(DB.highlights()||[]).filter(function(h){return h&&h.active});
   camps.forEach(function(c){items.push({type:'campaign',c:c})});
   return items;
+}
+
+// Total de produtos marcados como destaque, contando tambem o buffer proprio
+// de destaques (nem sempre o catalogo esta completo quando o painel abre).
+// A dedupe e feita por id ANTES de olhar a flag, para que a copia antiga do
+// buffer nao conte de novo um produto que o painel acabou de desligar.
+function featuredProductCount(excludeId){
+  var seen={}, n=0;
+  function add(p){
+    if(!p||!p.id||p.id===excludeId||seen[p.id]) return;
+    seen[p.id]=1;
+    if(p.featured) n++;
+  }
+  DB.products().forEach(add);
+  try{ DB.featuredProducts().forEach(add); }catch(e){}
+  return n;
 }
 
 function carouselSlideForItem(item,i,total){
@@ -1734,10 +1808,13 @@ function getFilteredProducts(){
       return haystack.indexOf(term)>=0;
     });
   }
+  // Ordem alfabetica e o padrao (inclusive para valores antigos/invalidos).
+  // Ela usa o mesmo comparador da busca no Firestore, entao a ordem da tela
+  // e identica a ordem de chegada dos lotes: nada pula de lugar na grade.
   if(filters.sort==='rating') filtered.sort(function(a,b){return b.rating-a.rating});
   else if(filters.sort==='newest') filtered.sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
-  else if(filters.sort==='alpha') filtered.sort(function(a,b){return a.name.localeCompare(b.name)});
-  else filtered.sort(function(a,b){return(b.featured?1:0)-(a.featured?1:0)});
+  else if(filters.sort==='featured') filtered.sort(function(a,b){return(b.featured?1:0)-(a.featured?1:0)});
+  else filtered.sort(compareByName);
   return filtered;
 }
 
@@ -1756,20 +1833,81 @@ function loadingCatalogGrid(){
   return '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+cards+'</div>';
 }
 
+function catalogResultsCountHTML(filtered){
+  const n=resultCount(filtered);
+  return '<strong class="text-gray-800">'+n+'</strong> produto'+(n!==1?'s':'')+' encontrado'+(n!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>');
+}
+
+function loadMoreWrapHTML(filtered){
+  if(catalogVisibleCount>=filtered.length){
+    return '<p class="text-center text-xs text-gray-400 mt-8"><i class="fas fa-check-circle text-green-500 mr-1"></i>Voce ja viu todos os '+filtered.length+' produto'+(filtered.length!==1?'s':'')+' cadastrado'+(filtered.length!==1?'s':'')+'.</p>';
+  }
+  return '<button onclick="loadMoreProducts()" class="catalog-load-more inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold px-8 py-3 rounded-xl transition-all hover:shadow-lg">'+
+    '<i class="fas fa-plus-circle"></i> Carregar mais produtos</button>'+
+    '<p class="catalog-count text-xs text-gray-400 mt-3">Mostrando '+catalogVisibleCount+' de '+filtered.length+' produto'+(filtered.length!==1?'s':'')+'</p>';
+}
+
 function renderCatalogGrid(filtered){
   const shown=filtered.slice(0,catalogVisibleCount);
   let html='<div id="catalog-grid" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+
     shown.map(function(p){return renderProductCard(p)}).join('')+
   '</div>';
   if(catalogVisibleCount<filtered.length){
-    html+='<div id="load-more-wrap" class="text-center mt-8">'+
-      '<button onclick="loadMoreProducts()" class="catalog-load-more inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold px-8 py-3 rounded-xl transition-all hover:shadow-lg">'+
-        '<i class="fas fa-plus-circle"></i> Carregar mais produtos'+
-      '</button>'+
-      '<p class="catalog-count text-xs text-gray-400 mt-3">Mostrando '+catalogVisibleCount+' de '+filtered.length+' produto'+(filtered.length!==1?'s':'')+'</p>'+
-    '</div>';
+    html+='<div id="load-more-wrap" class="text-center mt-8">'+loadMoreWrapHTML(filtered)+'</div>';
   }
   return html;
+}
+
+// Assinatura do que esta desenhado na grade. Enquanto ela nao mudar, novos
+// produtos chegam APENAS por insercao no fim - nenhum card ja visivel e
+// remontado, entao a tela do usuario fica parada.
+function catalogDomKey(list,n){
+  const ids=[];
+  for(let i=0;i<n&&i<list.length;i++){
+    const p=list[i]||{};
+    ids.push(p.id+'~'+(p.name||'')+'~'+(p.price==null?'':p.price)+'~'+(p.featured?1:0)+'~'+(p.prescription?1:0));
+  }
+  return ids.join('|');
+}
+function markCatalogGridSynced(){
+  const grid=document.getElementById('catalog-grid');
+  window._catalogDomKey = grid ? catalogDomKey(getFilteredProducts(),grid.children.length) : '';
+}
+
+// Atualiza contadoras ("X produtos encontrados" / "Mostrando N de M") sem
+// mexer nos cards.
+function syncCatalogCounters(filtered){
+  const count=document.getElementById('catalog-results-count');
+  if(count) count.innerHTML=catalogResultsCountHTML(filtered);
+  const wrap=document.getElementById('load-more-wrap');
+  if(wrap){ wrap.innerHTML=loadMoreWrapHTML(filtered); return; }
+  const grid=document.getElementById('catalog-grid');
+  if(grid&&catalogVisibleCount<filtered.length){
+    grid.insertAdjacentHTML('afterend','<div id="load-more-wrap" class="text-center mt-8">'+loadMoreWrapHTML(filtered)+'</div>');
+  }
+}
+
+// Anexa em segundo plano os produtos que terminaram de carregar, sem
+// reconstruir a grade. So e permitido quando a lista visivel nao mudou de
+// conteudo (mesma ordem alfabetica, sem filtro ativo): se qualquer card tivesse
+// que trocar de lugar, devolvemos false e quem chamou re-renderiza por completo.
+function syncCatalogGrid(filtered){
+  try{
+    const grid=document.getElementById('catalog-grid');
+    if(!grid) return false;
+    const f=DB.filters();
+    if(f.category||f.species||f.brand||f.search||f.sort!=='alpha') return false;
+    const target=Math.min(catalogVisibleCount,filtered.length);
+    const have=grid.children.length;
+    if(have>target) return false;
+    if(catalogDomKey(filtered,have)!==window._catalogDomKey) return false;
+    if(have<target){
+      grid.insertAdjacentHTML('beforeend',filtered.slice(have,target).map(function(p){return renderProductCard(p)}).join(''));
+      window._catalogDomKey=catalogDomKey(filtered,target);
+    }
+    syncCatalogCounters(filtered);
+    return true;
+  }catch(e){ return false; }
 }
 
 function loadMoreProducts(){
@@ -1783,15 +1921,8 @@ function loadMoreProducts(){
     grid.insertAdjacentHTML('beforeend',filtered.slice(prev,catalogVisibleCount).map(function(p){return renderProductCard(p)}).join(''));
   }
   const wrap=document.getElementById('load-more-wrap');
-  if(wrap){
-    if(catalogVisibleCount>=filtered.length){
-      wrap.innerHTML='<p class="text-center text-xs text-gray-400 mt-8"><i class="fas fa-check-circle text-green-500 mr-1"></i>Voce ja viu todos os '+filtered.length+' produto'+(filtered.length!==1?'s':'')+' cadastrado'+(filtered.length!==1?'s':'')+'.</p>';
-    } else {
-      wrap.innerHTML='<button onclick="loadMoreProducts()" class="catalog-load-more inline-flex items-center gap-2 bg-green-600 hover:bg-green-500 text-white font-semibold px-8 py-3 rounded-xl transition-all hover:shadow-lg">'+
-        '<i class="fas fa-plus-circle"></i> Carregar mais produtos</button>'+
-        '<p class="catalog-count text-xs text-gray-400 mt-3">Mostrando '+catalogVisibleCount+' de '+filtered.length+' produto'+(filtered.length!==1?'s':'')+'</p>';
-    }
-  }
+  if(wrap) wrap.innerHTML=loadMoreWrapHTML(filtered);
+  markCatalogGridSynced();
   window._catalogLoadingMore=false;
 }
 
@@ -1842,7 +1973,20 @@ function notifyProductsFullyLoaded(){
 }
 function notifyProductsMetaLoaded(){
   if(State.view==='catalog'){
-    render();
+    var aside=document.getElementById('catalog-filters-aside');
+    var grid=document.getElementById('catalog-grid');
+    if(aside&&grid){
+      // Chegou o total de produtos: muda apenas os numeros (total e contagem
+      // por categoria/especie/marca). Atualiza os textos e o menu lateral sem
+      // remontar os cards que o usuario ja esta olhando.
+      try{
+        var filters=DB.filters();
+        aside.innerHTML=catalogFilterAsideHTML(DB.products().filter(function(p){return p.active}),filters);
+        syncCatalogCounters(getFilteredProducts());
+      }catch(e){}
+    } else {
+      render();
+    }
   }
   else if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot')){
     try{ renderAdminSection(); }catch(e){}
@@ -1881,10 +2025,10 @@ function renderCatalog(){
       '</div>'+
       '<select id="sort-select" onchange="updateSort(this.value)"'+
         ' class="px-4 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 outline-none cursor-pointer">'+
+        '<option value="alpha" '+(filters.sort==='alpha'?'selected':'')+'>Ordem Alfab&eacute;tica</option>'+
         '<option value="featured" '+(filters.sort==='featured'?'selected':'')+'>Destaques</option>'+
         '<option value="newest" '+(filters.sort==='newest'?'selected':'')+'>Mais Recentes</option>'+
         //'<option value="rating" '+(filters.sort==='rating'?'selected':'')+'>Mais Avaliados</option>'+
-        '<option value="alpha" '+(filters.sort==='alpha'?'selected':'')+'>Ordem Alfabética</option>'+
       '</select>'+
     '</div>'+
 
@@ -1900,7 +2044,7 @@ function renderCatalog(){
           (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
         '</div>':'')+
 
-         '<p class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium mb-2 block">Carregando produtos do cat&aacute;logo...</span><div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>':('<strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')))+'</p>'+
+         '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium mb-2 block">Carregando produtos do cat&aacute;logo...</span><div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>':catalogResultsCountHTML(filtered))+'</p>'+
 
         (filtered.length===0?(DB.isLoading()&&!DB.loadError()?loadingCatalogGrid():
         '<div class="text-center py-20">'+
@@ -1973,12 +2117,17 @@ function updateCatalogResults(keepPage){
   if(aside) aside.classList.toggle('lg:block',!!(filters.search));
   if(aside&&filters.category) aside.innerHTML=catalogFilterAsideHTML(products,filters);
 
+  // Lote novo chegou em segundo plano: se ele so acrescenta no fim da lista
+  // (ordem alfabetica intacta), anexa os cards e atualiza os contadores sem
+  // remontar a grade - os cards ja na tela nao piscam nem mudam de lugar.
+  if(syncCatalogGrid(filtered)) return;
+
   var html=((filters.category||filters.species||filters.brand||filters.search)?'<div class="flex items-center flex-wrap gap-2 mb-5">'+
     (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
     (filters.species?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-paw text-xs"></i>'+filters.species+'<button onclick="toggleSpecies(\''+filters.species+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
     (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
   '</div>':'')+
-  '<p class="text-sm text-gray-500 mb-5"><strong class="text-gray-800">'+resultCount(filtered)+'</strong> produto'+(resultCount(filtered)!==1?'s':'')+' encontrado'+(resultCount(filtered)!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>')+'</p>'+
+  '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+catalogResultsCountHTML(filtered)+'</p>'+
   (filtered.length===0?'<div class="text-center py-20">'+
     '<div class="text-6xl mb-4">🔍</div>'+
     '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
@@ -1988,6 +2137,7 @@ function updateCatalogResults(keepPage){
 
   var area=document.getElementById('catalog-grid-area');
   if(area) area.innerHTML=html;
+  markCatalogGridSynced();
 }
 
 function renderProductCard(p){
@@ -2049,8 +2199,8 @@ function updateSort(val){const f=DB.filters();f.sort=val;DB.setFilters(f);syncNa
 function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;if(next){f.species='';f.brand='';catalogSpeciesOpen=true;catalogBrandOpen=true;}DB.setFilters(f);syncNavHash();render()}
 function toggleSpecies(s){const f=DB.filters();const next=f.species===s?'':s;if(next)trackEvent('filter',{kind:'species',value:s});f.species=next;DB.setFilters(f);syncNavHash();render()}
 function toggleBrand(b){const f=DB.filters();const next=f.brand===b?'':b;if(next)trackEvent('filter',{kind:'brand',value:b});f.brand=next;DB.setFilters(f);syncNavHash();render()}
-function clearFilters(){resetCatalogFilterUI();DB.setFilters({category:'',species:'',brand:'',search:'',sort:'featured'});syncNavHash();render()}
-function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});catalogShowAllCats=false;catalogSpeciesOpen=true;catalogBrandOpen=true;DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'featured'});navigate('catalog')}
+function clearFilters(){resetCatalogFilterUI();DB.setFilters({category:'',species:'',brand:'',search:'',sort:'alpha'});syncNavHash();render()}
+function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});catalogShowAllCats=false;catalogSpeciesOpen=true;catalogBrandOpen=true;DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'alpha'});navigate('catalog')}
 function submitContactForm(){
   const name=document.getElementById('contact-name').value.trim();
   const phone=document.getElementById('contact-phone').value.trim();
@@ -4298,15 +4448,22 @@ function toggleSwitchHtml(on,onclick){
 function toggleHighlightProduct(id){
   var products=DB.products();
   var p=products.find(function(x){return x.id===id});
-  if(!p) return;
+  if(!p){
+    // O catalogo chega em lotes: o produto pode existir apenas no buffer proprio
+    // de destaques. Entra na lista local para o clique ser salvo normalmente.
+    var buf=DB.featuredProducts().find(function(x){return x.id===id});
+    if(!buf) return;
+    p=Object.assign({},buf);
+    products=products.concat([p]);
+  }
   var on=!p.featured;
   if(on){
-    var cnt=products.filter(function(x){return x.id!==id&&x.featured}).length;
+    var cnt=featuredProductCount(id);
     if(cnt>=5){showToast('Limite de 5 produtos em destaque atingido. Desligue um para ligar outro.','error');return}
   }
   p.featured=on;
   DB.setProducts(products);
-  var onCount=products.filter(function(x){return x.featured}).length;
+  var onCount=featuredProductCount(null);
   showToast(on?('Produto marcado como destaque ('+onCount+'/5).'):'Produto removido dos destaques','info');
   renderAdminSection();
 }
@@ -4326,7 +4483,7 @@ function renderAdminHighlights(){
     if(af!==bf)return bf-af;
     return (a.name||'').localeCompare(b.name||'');
   });
-  var onCount=products.filter(function(p){return p&&p.featured}).length;
+  var onCount=featuredProductCount(null);
   var overLimit=onCount>5;
   var fills=onCount>5?0:5-onCount;
   var highlights=DB.highlights();
@@ -5598,7 +5755,7 @@ function saveProduct(e,id){
     var wantFeatured=f.get('featured')==='on';
     var featured=wantFeatured;
     if(wantFeatured){
-      var featuredCount=products.filter(function(x){return x.id!==id&&x.featured}).length;
+      var featuredCount=featuredProductCount(id);
       if(featuredCount>=5){
         featured=false;
         showToast('Limite de 5 produtos em destaque atingido. Destaque n\u00e3o marcado. Desligue um em Destaques > Produtos.','warn');
