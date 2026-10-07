@@ -253,7 +253,7 @@
           <li><i class="fas fa-phone mr-2"></i>(55) 3332-4124</li>
           <li><i class="fab fa-instagram mr-2"></i>@agrovelagroveterinaria</li>
           <li><i class="fab fa-whatsapp mr-2"></i>(55) 99109-5001</li>
-          <li><i class="fas fa-map-marker-alt mr-2"></i>Av. 21 de Abril, 1004 - Bairro Osvaldo Aranha, Ijuí - RS</li>
+          <li><i class="fas fa-map-marker-alt mr-2"></i>Av. 21 de Abril, 1004 - Bairro Osvaldo Aranha, Ijuí - RS - CEP 98703-498</li>
         </ul>
       </div>
     </div>
@@ -2799,6 +2799,31 @@ function renderAbout(){
         '</div>';
       }).join('')+
     '</section>'+
+    '<section class="mb-12">'+
+      '<div class="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-green-100">'+
+        '<h3 class="font-bold text-gray-900 text-lg mb-5 flex items-center gap-2"><i class="fas fa-clock text-green-600"></i>Hor&aacute;rios de Atendimento</h3>'+
+        '<div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">'+
+          '<div class="bg-green-50 border border-green-100 rounded-xl p-4 text-center">'+
+            '<div class="text-xs font-bold text-green-700 uppercase tracking-wide mb-2 flex items-center justify-center gap-2"><i class="fas fa-briefcase"></i>Segunda a sexta</div>'+
+            '<div class="text-sm text-gray-700 leading-relaxed"><span class="font-semibold">07:30</span> &agrave;s <span class="font-semibold">12:00</span><br><span class="font-semibold">13:30</span> &agrave;s <span class="font-semibold">18:00</span></div>'+
+          '</div>'+
+          '<div class="bg-green-50 border border-green-100 rounded-xl p-4 text-center">'+
+            '<div class="text-xs font-bold text-green-700 uppercase tracking-wide mb-2 flex items-center justify-center gap-2"><i class="fas fa-calendar-day"></i>S&aacute;bados</div>'+
+            '<div class="text-sm text-gray-700 leading-relaxed"><span class="font-semibold">08:00</span> &agrave;s <span class="font-semibold">12:00</span></div>'+
+          '</div>'+
+        '</div>'+
+        '<div class="bg-amber-50 border-2 border-amber-400 rounded-xl p-4 md:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">'+
+          '<div class="flex items-center gap-3">'+
+            '<div class="w-11 h-11 bg-amber-500 rounded-full flex items-center justify-center text-white flex-shrink-0 shadow"><i class="fas fa-bell text-lg"></i></div>'+
+            '<div>'+
+              '<div class="font-extrabold text-gray-900 flex items-center gap-2"><i class="fas fa-star text-amber-500 text-xs"></i>Plant&atilde;o<i class="fas fa-star text-amber-500 text-xs"></i></div>'+
+              '<div class="text-sm text-gray-600">Atendimento de emerg&ecirc;ncia &bull; fora do hor&aacute;rio regular</div>'+
+            '</div>'+
+          '</div>'+
+          '<a href="https://wa.me/5555991551851?text='+encodeURIComponent('Olá! Preciso do serviço de Plantão da Agrovel.')+'" target="_blank" rel="noopener" class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-3 rounded-xl transition-colors inline-flex items-center justify-center gap-2 text-center"><i class="fab fa-whatsapp"></i>Plant&atilde;o &bull; 55 99155-1851</a>'+
+        '</div>'+
+      '</div>'+
+    '</section>'+
     '<section class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-12">'+
       '<div class="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-green-100">'+
         '<h3 class="font-bold text-gray-900 text-lg mb-4 flex items-center gap-2"><i class="fas fa-box-open text-green-600"></i>O que voc&ecirc; encontra na Agrovel</h3>'+
@@ -2813,7 +2838,7 @@ function renderAbout(){
       '<div class="bg-white rounded-2xl p-6 md:p-8 shadow-sm border border-green-100">'+
         '<h3 class="font-bold text-gray-900 text-lg mb-4 flex items-center gap-2"><i class="fas fa-map-marker-alt text-green-600"></i>Onde estamos</h3>'+
         '<div class="space-y-2 text-sm text-gray-600 mb-4">'+
-          '<p><i class="fas fa-map-marker-alt text-green-500 mr-2"></i><strong>Endere&ccedil;o:</strong> Av. 21 de Abril, 1004 - Bairro Osvaldo Aranha, Iju&iacute; - RS</p>'+
+          '<p><i class="fas fa-map-marker-alt text-green-500 mr-2"></i><strong>Endere&ccedil;o:</strong> <a href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent('Av. 21 de Abril, 1004 - Bairro Osvaldo Aranha, Ijuí - RS, CEP 98703-498')+'" target="_blank" rel="noopener" class="text-green-700 font-semibold underline hover:text-green-800">Av. 21 de Abril, 1004 - Bairro Osvaldo Aranha, Iju&iacute; - RS - CEP 98703-498</a></p>'+
           '<p><i class="fas fa-phone text-green-500 mr-2"></i><strong>Telefone:</strong> (55) 3332-4124</p>'+
           '<p><i class="fab fa-whatsapp text-green-500 mr-2"></i><strong>WhatsApp:</strong> (55) 99109-5001</p>'+
           '<p><i class="fab fa-instagram text-green-500 mr-2"></i><strong>Instagram:</strong> @agrovelagroveterinaria</p>'+
