@@ -1587,6 +1587,20 @@ function featPause(p){
 var CATALOG_PAGE_SIZE=15;
 var catalogVisibleCount=CATALOG_PAGE_SIZE;
 
+// Filtros do catalogo: categorias comecam limitadas a 8 + "Ver Todas as
+// Categorias"; Especie Animal e Marca ficam recolhidos por padrao e so
+// exibem opcoes relacionadas a categoria selecionada.
+var CATALOG_INITIAL_CATS=8;
+var catalogShowAllCats=false;
+var catalogSpeciesOpen=false;
+var catalogBrandOpen=false;
+
+function resetCatalogFilterUI(){
+  catalogShowAllCats=false;
+  catalogSpeciesOpen=false;
+  catalogBrandOpen=false;
+}
+
 function resetCatalogPagination(){
   catalogVisibleCount=CATALOG_PAGE_SIZE;
 }
@@ -1594,6 +1608,84 @@ function resetCatalogPagination(){
 function catalogUsingAnyFilter(){
   const f=DB.filters();
   return !!(f.category||f.search||f.species||f.brand);
+}
+
+function getSpeciesForCategory(cat){
+  if(!cat) return getAllSpecies();
+  return [...new Set(DB.products().filter(function(p){return p.active&&p.category===cat&&p.species}).map(function(p){return p.species}))].sort();
+}
+function getBrandsForCategory(cat){
+  if(!cat) return getAllBrands();
+  return [...new Set(DB.products().filter(function(p){return p.active&&p.category===cat&&p.brand}).map(function(p){return p.brand}))].sort();
+}
+
+function toggleAllCategories(){
+  catalogShowAllCats=!catalogShowAllCats;
+  render();
+}
+function toggleFilterSection(which){
+  if(which==='species') catalogSpeciesOpen=!catalogSpeciesOpen;
+  else if(which==='brand') catalogBrandOpen=!catalogBrandOpen;
+  render();
+}
+
+function catalogFilterAsideHTML(products,filters){
+  var cats=getAllCategories().filter(function(c){return filters.category===c||catCount(products,c)>0});
+  var catLimit=catalogShowAllCats?cats.length:CATALOG_INITIAL_CATS;
+  var visibleCats=cats.slice(0,catLimit);
+  var catHtml=visibleCats.map(function(c){return '<button onclick="toggleCategory(\''+c+'\')" '+
+    'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.category===c?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
+    '<i class="fas '+(iconForCat(c))+' mr-2 text-green-400"></i>'+c+
+    ' <span class="float-right text-xs text-gray-400">'+catCount(products,c)+'</span>'+
+  '</button>'}).join('');
+  if(cats.length>CATALOG_INITIAL_CATS){
+    catHtml+='<button onclick="toggleAllCategories()" class="w-full text-left px-3 py-2 rounded-lg text-sm font-semibold text-green-700 hover:bg-green-50 transition-all">'+
+      '<i class="fas '+(catalogShowAllCats?'fa-chevron-up':'fa-chevron-down')+' mr-2 text-green-500"></i>'+(catalogShowAllCats?'Ver Menos Categorias':'Ver Todas as Categorias')+
+    '</button>';
+  }
+
+  var species=getSpeciesForCategory(filters.category);
+  var speciesHtml=species.length?'<div class="mt-5 border-t border-green-100 pt-4">'+
+    '<button onclick="toggleFilterSection(\'species\')" class="w-full flex items-center justify-between text-left mb-3">'+
+      '<span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Esp\u00e9cie Animal</span>'+
+      '<i class="fas fa-chevron-'+(catalogSpeciesOpen?'up':'down')+' text-xs text-gray-400"></i>'+
+    '</button>'+
+    '<div class="space-y-1.5" style="display:'+(catalogSpeciesOpen?'block':'none')+'">'+
+      species.map(function(s){return '<button onclick="toggleSpecies(\''+s+'\')" '+
+        'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.species===s?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
+        '<i class="fas fa-paw mr-2 text-green-400"></i>'+s+
+        ' <span class="float-right text-xs text-gray-400">'+speciesCount(products,s)+'</span>'+
+      '</button>'}).join('')+
+    '</div>'+
+  '</div>':'';
+
+  var brands=getBrandsForCategory(filters.category);
+  var brandHtml=brands.length?'<div class="mt-5 border-t border-green-100 pt-4">'+
+    '<button onclick="toggleFilterSection(\'brand\')" class="w-full flex items-center justify-between text-left mb-3">'+
+      '<span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Marca</span>'+
+      '<i class="fas fa-chevron-'+(catalogBrandOpen?'up':'down')+' text-xs text-gray-400"></i>'+
+    '</button>'+
+    '<div class="space-y-1.5" style="display:'+(catalogBrandOpen?'block':'none')+'">'+
+      brands.map(function(b){return '<button onclick="toggleBrand(\''+b+'\')" '+
+        'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.brand===b?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
+        b+
+        ' <span class="float-right text-xs text-gray-400">'+brandCount(products,b)+'</span>'+
+      '</button>'}).join('')+
+    '</div>'+
+  '</div>':'';
+
+  return '<div class="bg-white rounded-2xl shadow-sm border border-green-100 p-5 sticky top-24">'+
+    '<div class="flex items-center justify-between mb-4">'+
+      '<h3 class="font-bold text-gray-800">Filtros</h3>'+
+      ((filters.category||filters.species||filters.brand)?'<button onclick="clearFilters()" class="text-xs text-green-600 hover:text-green-800">Limpar</button>':'')+
+    '</div>'+
+    '<div>'+
+      '<p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Categoria</p>'+
+      '<div class="space-y-1.5">'+catHtml+'</div>'+
+    '</div>'+
+    speciesHtml+
+    brandHtml+
+  '</div>';
 }
 function catCount(products,c){
   if(!catalogUsingAnyFilter()){
@@ -1603,18 +1695,22 @@ function catCount(products,c){
   return products.filter(function(p){return p.category===c}).length;
 }
 function speciesCount(products,s){
+  const f=DB.filters();
   if(!catalogUsingAnyFilter()){
     const meta=DB.productsMeta();
     return (meta.species&&meta.species[s])||0;
   }
-  return products.filter(function(p){return p.species===s}).length;
+  const base=f.category?products.filter(function(p){return p.category===f.category}):products;
+  return base.filter(function(p){return p.species===s}).length;
 }
 function brandCount(products,b){
+  const f=DB.filters();
   if(!catalogUsingAnyFilter()){
     const meta=DB.productsMeta();
     return (meta.brands&&meta.brands[b])||0;
   }
-  return products.filter(function(p){return p.brand===b}).length;
+  const base=f.category?products.filter(function(p){return p.category===f.category}):products;
+  return base.filter(function(p){return p.brand===b}).length;
 }
 function resultCount(filtered){
   if(!catalogUsingAnyFilter()){
@@ -1794,42 +1890,7 @@ function renderCatalog(){
 
     '<div class="flex flex-col lg:flex-row gap-8">'+
       '<aside id="catalog-filters-aside" class="lg:w-64 flex-shrink-0'+(filters.search?' hidden lg:block':'')+'">'+
-        '<div class="bg-white rounded-2xl shadow-sm border border-green-100 p-5 sticky top-24">'+
-          '<div class="flex items-center justify-between mb-4">'+
-            '<h3 class="font-bold text-gray-800">Filtros</h3>'+
-            ((filters.category||filters.species||filters.brand)?'<button onclick="clearFilters()" class="text-xs text-green-600 hover:text-green-800">Limpar</button>':'')+
-          '</div>'+
-          '<div class="mb-5">'+
-            '<p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Categoria</p>'+
-            '<div class="space-y-1.5">'+
-              getAllCategories().filter(function(c){return filters.category===c||catCount(products,c)>0}).map(function(c){return '<button onclick="toggleCategory(\''+c+'\')" '+
-                'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.category===c?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
-                '<i class="fas '+(iconForCat(c))+' mr-2 text-green-400"></i>'+c+
-                ' <span class="float-right text-xs text-gray-400">'+catCount(products,c)+'</span>'+
-              '</button>'}).join('')+
-            '</div>'+
-          '</div>'+
-          (getAllSpecies().length?'<div class="mb-5">'+
-            '<p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Especie Animal</p>'+
-            '<div class="space-y-1.5">'+
-              getAllSpecies().map(function(s){return '<button onclick="toggleSpecies(\''+s+'\')" '+
-                'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.species===s?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
-                '<i class="fas fa-paw mr-2 text-green-400"></i>'+s+
-                ' <span class="float-right text-xs text-gray-400">'+speciesCount(products,s)+'</span>'+
-              '</button>'}).join('')+
-            '</div>'+
-          '</div>':'')+
-          (getAllBrands().length?'<div>'+
-            '<p class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Marca</p>'+
-            '<div class="space-y-1.5">'+
-              getAllBrands().map(function(b){return '<button onclick="toggleBrand(\''+b+'\')" '+
-                'class="w-full text-left px-3 py-2 rounded-lg text-sm transition-all '+(filters.brand===b?'bg-green-100 text-green-800 font-semibold':'text-gray-600 hover:bg-green-50 hover:text-green-700')+'">'+
-                b+
-                ' <span class="float-right text-xs text-gray-400">'+brandCount(products,b)+'</span>'+
-              '</button>'}).join('')+
-            '</div>'+
-          '</div>':'')+
-        '</div>'+
+        catalogFilterAsideHTML(products,filters)+
       '</aside>'+
 
       '<div id="catalog-grid-area" class="flex-1">'+
@@ -1882,6 +1943,7 @@ function renderCatalog(){
 
 function updateCatalogResults(keepPage){
   var filters=DB.filters();
+  var products=DB.products().filter(function(p){return p.active});
   var filtered=getFilteredProducts();
   // Primeiro carregamento apos o shell instantaneo: monta o carrossel de
   // destaques junto com os produtos re-renderizando a pagina inteira.
@@ -1909,6 +1971,7 @@ function updateCatalogResults(keepPage){
   var aside=document.getElementById('catalog-filters-aside');
   if(aside) aside.classList.toggle('hidden',!!(filters.search));
   if(aside) aside.classList.toggle('lg:block',!!(filters.search));
+  if(aside&&filters.category) aside.innerHTML=catalogFilterAsideHTML(products,filters);
 
   var html=((filters.category||filters.species||filters.brand||filters.search)?'<div class="flex items-center flex-wrap gap-2 mb-5">'+
     (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
@@ -1983,11 +2046,11 @@ function clearSearch(){
   if(document.getElementById('search-input'))document.getElementById('search-input').focus();
 }
 function updateSort(val){const f=DB.filters();f.sort=val;DB.setFilters(f);syncNavHash();render()}
-function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;DB.setFilters(f);syncNavHash();render()}
+function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;if(next){f.species='';f.brand='';catalogSpeciesOpen=true;catalogBrandOpen=true;}DB.setFilters(f);syncNavHash();render()}
 function toggleSpecies(s){const f=DB.filters();const next=f.species===s?'':s;if(next)trackEvent('filter',{kind:'species',value:s});f.species=next;DB.setFilters(f);syncNavHash();render()}
 function toggleBrand(b){const f=DB.filters();const next=f.brand===b?'':b;if(next)trackEvent('filter',{kind:'brand',value:b});f.brand=next;DB.setFilters(f);syncNavHash();render()}
-function clearFilters(){DB.setFilters({category:'',species:'',brand:'',search:'',sort:'featured'});syncNavHash();render()}
-function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'featured'});navigate('catalog')}
+function clearFilters(){resetCatalogFilterUI();DB.setFilters({category:'',species:'',brand:'',search:'',sort:'featured'});syncNavHash();render()}
+function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});catalogShowAllCats=false;catalogSpeciesOpen=true;catalogBrandOpen=true;DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'featured'});navigate('catalog')}
 function submitContactForm(){
   const name=document.getElementById('contact-name').value.trim();
   const phone=document.getElementById('contact-phone').value.trim();
