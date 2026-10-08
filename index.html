@@ -68,6 +68,16 @@
   @keyframes carouselBadge{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:none}}
   @keyframes carouselTitle{from{opacity:0;transform:translateX(-16px)}to{opacity:1;transform:none}}
   @keyframes carouselCopy{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+  /* Depoimentos carousel */
+  .testimonials-carousel .carousel-track{align-items:stretch}
+  .testimonials-carousel .carousel-slide{padding:0 8px;height:auto;display:flex}
+  .testimonials-carousel .carousel-slide article{width:100%;display:flex;flex-direction:column}
+  .testimonials-carousel .carousel-dots{bottom:-20px}
+  .testimonials-carousel .carousel-dot{background:rgba(34,197,94,.25)}
+  .testimonials-carousel .carousel-dot.active{background:#22c55e;width:28px}
+  .testimonials-carousel .carousel-arrow{background:rgba(255,255,255,.95);color:#15803d;border:1px solid #bbf7d0;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+  .testimonials-carousel .carousel-arrow:hover{background:#fff;transform:translateY(-50%) scale(1.08)}
+  .testimonials-carousel{padding-bottom:32px}
   @keyframes progressIndeterminate{0%{left:-40%;width:40%}50%{left:30%;width:50%}100%{left:100%;width:40%}}
   .progress-bar-indeterminate{animation:progressIndeterminate 1.4s ease-in-out infinite}
   .img-chip{position:relative;width:88px;height:88px;border-radius:12px;overflow:hidden;border:2px solid #d1fae5;box-shadow:0 1px 4px rgba(0,0,0,.1)}
@@ -1391,7 +1401,7 @@ function render(){
     case 'confirmation':mc.innerHTML=renderConfirmation(State.orderId);break;
     case 'blog':mc.innerHTML=renderBlog();resolveIdbMedia(mc);break;
     case 'blog-post':mc.innerHTML=renderBlogPost(State.newsId);resolveIdbMedia(mc);break;
-    case 'about':mc.innerHTML=renderAbout();break;
+    case 'about':mc.innerHTML=renderAbout();setTimeout(function(){initTestimonialsCarousel();},50);break;
     case 'login':mc.innerHTML=renderLogin();break;
     case 'admin':mc.innerHTML=renderAdmin();renderAdminSection();break;
     default:mc.innerHTML=renderCatalog();featInit();
@@ -1645,6 +1655,62 @@ function featInit(){
     if(featPaused)return;
     featMove(1);
   },6000);
+}
+
+function initTestimonialsCarousel(){
+  var car=document.querySelector('.testimonials-carousel');
+  if(!car)return;
+  var track=car.querySelector('.carousel-track');
+  var slides=car.querySelectorAll('.carousel-slide');
+  var prev=car.querySelector('.carousel-arrow.prev');
+  var next=car.querySelector('.carousel-arrow.next');
+  var dots=car.querySelectorAll('.carousel-dot');
+  if(!track||slides.length===0)return;
+  var idx=0;
+  var timer=null;
+  var paused=false;
+  var autoplay=Number(car.getAttribute('data-autoplay'))||0;
+  if(autoplay<1000) autoplay=4000;
+  var pauseOnHover=car.getAttribute('data-pause-on-hover')!=='false';
+  function go(i){
+    var total=slides.length;
+    if(total===0)return;
+    idx=((i%total)+total)%total;
+    track.style.transform='translateX(-'+(idx*100)+'%)';
+    dots.forEach(function(d,k){
+      d.classList.toggle('active',k===idx);
+    });
+  }
+  function move(dir){
+    go(idx+dir);
+  }
+  if(prev)prev.addEventListener('click',function(e){e.preventDefault();move(-1);restart();});
+  if(next)next.addEventListener('click',function(e){e.preventDefault();move(1);restart();});
+  dots.forEach(function(d){
+    d.addEventListener('click',function(e){
+      e.preventDefault();
+      go(Number(d.getAttribute('data-index'))||0);
+      restart();
+    });
+  });
+  if(pauseOnHover){
+    car.addEventListener('mouseenter',function(){paused=true;clearInterval(timer);});
+    car.addEventListener('mouseleave',function(){paused=false;start();});
+  }
+  function start(){
+    clearInterval(timer);
+    if(autoplay>0){
+      timer=setInterval(function(){
+        if(!paused) move(1);
+      },autoplay);
+    }
+  }
+  function restart(){
+    clearInterval(timer);
+    start();
+  }
+  go(0);
+  start();
 }
 var featPaused=false;
 function featPause(p){
@@ -3062,7 +3128,10 @@ function submitTestimonial(){
   trackEvent('testimonial',{name:name,rating:rating});
   showToast('Depoimento enviado! Ser\u00e1 publicado ap\u00f3s aprova\u00e7\u00e3o da equipe.','success');
   var sec=document.getElementById('about-testimonials');
-  if(sec) sec.innerHTML=renderTestimonialsSection();
+  if(sec){ 
+    sec.innerHTML=renderTestimonialsSection();
+    setTimeout(function(){initTestimonialsCarousel();},50);
+  }
 }
 function renderTestimonialsSection(){
   var approved=approvedTestimonials().slice().sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
@@ -3074,24 +3143,33 @@ function renderTestimonialsSection(){
   }
   var board='';
   if(approved.length){
-    board='<div class="grid grid-cols-1 sm:grid-cols-2 gap-4">'+
-      approved.map(function(t){
-        return '<article class="relative bg-white rounded-2xl p-5 shadow-sm border border-green-100 hover:shadow-md transition-shadow overflow-hidden">'+
-          '<div class="absolute -top-4 -right-1 text-7xl leading-none text-green-50 font-serif select-none pointer-events-none">&ldquo;</div>'+
-          '<div class="relative flex items-center justify-between mb-2.5">'+
-            '<div class="flex gap-0.5">'+stars(t.rating)+'</div>'+
-            '<span class="text-[11px] font-medium text-gray-300">'+testimonialDate(t.createdAt)+'</span>'+
-          '</div>'+
-          '<p class="relative text-sm text-gray-600 leading-relaxed mb-4 whitespace-pre-line">"'+esc(t.text)+'"</p>'+
-          '<div class="relative flex items-center gap-3 pt-3 border-t border-gray-100">'+
-            '<div class="w-10 h-10 rounded-full bg-gradient-to-br '+testimonialAvatarBg(t.name)+' text-white flex items-center justify-center text-[11px] font-bold flex-shrink-0">'+testimonialInitials(t.name)+'</div>'+
-            '<div class="min-w-0">'+
-              '<div class="text-sm font-bold text-gray-900 truncate flex items-center gap-1.5">'+esc(t.name)+'<i class="fas fa-circle-check text-green-500 text-[11px] flex-shrink-0" title="Depoimento verificado"></i></div>'+
-              '<div class="text-xs text-gray-400 truncate">'+(t.city?esc(t.city):'Cliente Agrovel')+'</div>'+
-            '</div>'+
-          '</div>'+
-        '</article>';
-      }).join('')+
+    board=    '<div class="testimonials-carousel carousel w-full relative" data-autoplay="4000" data-pause-on-hover="true">'+
+      '<button class="carousel-arrow prev" aria-label="Anterior"><i class="fas fa-chevron-left"></i></button>'+
+      '<button class="carousel-arrow next" aria-label="Próximo"><i class="fas fa-chevron-right"></i></button>'+
+      '<div class="carousel-track">'+
+        approved.map(function(t){
+          return '<div class="carousel-slide">'+
+            '<article class="relative bg-white rounded-2xl p-5 shadow-sm border border-green-100 hover:shadow-md transition-shadow overflow-hidden h-full flex flex-col">'+
+              '<div class="absolute -top-4 -right-1 text-7xl leading-none text-green-50 font-serif select-none pointer-events-none">&ldquo;</div>'+
+              '<div class="relative flex items-center justify-between mb-2.5">'+
+                '<div class="flex gap-0.5">'+stars(t.rating)+'</div>'+
+                '<span class="text-[11px] font-medium text-gray-300">'+testimonialDate(t.createdAt)+'</span>'+
+              '</div>'+
+              '<p class="relative text-sm text-gray-600 leading-relaxed mb-4 whitespace-pre-line flex-1">"'+esc(t.text)+'"</p>'+
+              '<div class="relative flex items-center gap-3 pt-3 border-t border-gray-100 mt-auto">'+
+                '<div class="w-10 h-10 rounded-full bg-gradient-to-br '+testimonialAvatarBg(t.name)+' text-white flex items-center justify-center text-[11px] font-bold flex-shrink-0">'+testimonialInitials(t.name)+'</div>'+
+                '<div class="min-w-0">'+
+                  '<div class="text-sm font-bold text-gray-900 truncate flex items-center gap-1.5">'+esc(t.name)+'<i class="fas fa-circle-check text-green-500 text-[11px] flex-shrink-0" title="Depoimento verificado"></i></div>'+
+                  '<div class="text-xs text-gray-400 truncate">'+(t.city?esc(t.city):'Cliente Agrovel')+'</div>'+
+                '</div>'+
+              '</div>'+
+            '</article>'+
+          '</div>';
+        }).join('')+
+      '</div>'+
+      '<div class="carousel-dots">'+
+        approved.map(function(_,idx){return '<button class="carousel-dot '+(idx===0?'active':'')+'" data-index="'+idx+'"></button>'}).join('')+
+      '</div>'+
     '</div>';
   } else {
     board='<div class="bg-white rounded-2xl border border-dashed border-green-200 p-10 text-center">'+
