@@ -704,8 +704,8 @@ const DB = (function(){
   // A busca e SEMPRE feita por ordem de nome (ordem alfabetica), igual a
   // ordem de exibicao do catalogo: assim cada lote novo so acrescenta itens
   // no FIM da lista ja visivel e nada pula/muda de lugar na tela do usuario.
-  const PRODUCTS_FIRST_BATCH = 22;
-  const PRODUCTS_PAGE_SIZE = 50;
+  const PRODUCTS_FIRST_BATCH = 15;
+  const PRODUCTS_PAGE_SIZE = 75;
   // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
   // carrossel abrir ja completo (ate 5 slides) em vez de 1/5 enquanto o
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
@@ -714,7 +714,7 @@ const DB = (function(){
   // Ranking de mais visualizados: consulta dedicada, disparada somente quando o
   // popup de promocoes fecha. Traz uma vitrine inicial enquanto o restante do
   // catalogo continua chegando em lotes, em segundo plano.
-  const PRODUCTS_TOP_VIEWED = 15;
+  const PRODUCTS_TOP_VIEWED = 25;
   let _topViewed = [];
   let _topViewedReady = false;
   let _topViewedFromViews = true;
@@ -841,6 +841,7 @@ const DB = (function(){
         recomputeProductsMeta();
         persistProductsMeta();
         saveCache();
+        startProductsListener();
         try{ if(typeof notifyProductsFullyLoaded==='function') notifyProductsFullyLoaded(); }catch(e){}
       }
     }catch(e){
@@ -882,6 +883,64 @@ const DB = (function(){
         try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
       }
     }catch(e){ console.error('FB reconcile legacy', e); }
+  }
+
+  // Listener em tempo real do catalogo (onSnapshot). Depois que a carga
+  // inicial termina (_productsComplete), mantem a lista local sincronizada com
+  // o Firestore: produto novo entra, editado e atualizado, removido some, sem
+  // recarregar a pagina. A lista e sempre reordenada por compareByName
+  // (mesma ordem em que o banco envia os lotes).
+  let _productsListener = null;
+  let _productsRealtimeTimer = null;
+  let _productsRealtimePending = false;
+
+  function startProductsListener(){
+    if(!fire.db || _productsListener) return;
+    const col = productsCol();
+    if(!col) return;
+    try{
+      _productsListener = col.orderBy(firebase.firestore.FieldPath.documentId()).onSnapshot(function(snap){
+        try{
+          let changed=false;
+const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
+          snap.docChanges().forEach(function(change){
+            if(!change.doc || !change.doc.exists) return;
+            const p = change.doc.data() || {};
+            p.id = change.doc.id;
+            let index=-1;
+            for(let i=0;i<cur.length;i++){
+              if(cur[i] && cur[i].id===p.id){ index=i; break; }
+            }
+            if(change.type==='removed'){
+              if(index>=0){ cur.splice(index,1); changed=true; delete _productsBaseline[p.id]; }
+              return;
+            }
+            if(index>=0){
+              // Se ha escrita local pendente (ex.: admin salvando), nao
+              // sobrescreve a edicao; o flush envia e o snapshot reconcilia.
+              if(!_productsDirty && JSON.stringify(cur[index])!==JSON.stringify(p)){ cur[index]=p; changed=true; }
+            }else{
+              cur.push(p); changed=true;
+            }
+            _productsBaseline[p.id]=JSON.stringify(p);
+          });
+          if(!changed) return;
+          if(cur.length>1) cur.sort(compareByName);
+          recomputeProductsMeta();
+          saveCache();
+          if(_productsRealtimePending) return;
+          _productsRealtimePending=true;
+          if(_productsRealtimeTimer) clearTimeout(_productsRealtimeTimer);
+          _productsRealtimeTimer=setTimeout(function(){
+            _productsRealtimeTimer=null;
+            _productsRealtimePending=false;
+            try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+          },80);
+        }catch(e){ console.error('FB products listener', e); }
+      }, function(err){
+        console.error('FB products listener error', err);
+      });
+    }catch(e){ console.error('FB products listener setup', e); }
   }
 
   // Somente os produtos marcados como destaque (limite da vitrine). Consulta
@@ -1101,6 +1160,7 @@ const DB = (function(){
       }
       _productsComplete=true;
       persistProductsMeta();
+      startProductsListener();
     }catch(err){
       console.error('FB write products', err);
       _productsDirty = true;
@@ -1136,6 +1196,7 @@ const DB = (function(){
     _loadCritical: function(onPromoReady,onStageReady){ return loadCritical(onPromoReady,onStageReady); },
     _loadBackground: function(){ return loadBackground(); },
     _startCatalog: function(){ return startCatalog(); },
+    _startProductsListener: function(){ startProductsListener(); return true; },
     addProductView: function(id){ return _addProductView(id); },
     _loadProduct: function(id){ return loadProduct(id); },
     _loadCache: function(){ return loadCache(); },
