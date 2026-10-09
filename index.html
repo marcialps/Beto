@@ -519,7 +519,7 @@ const DB = (function(){
       case 'testimonials':return [];
       case 'cart':     return [];
       case 'currentUser': return null;
-      case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'alpha'};
+      case 'filters':  return {category:'',species:'',brand:'',search:'',sort:'views'};
     }
     return null;
   }
@@ -546,21 +546,45 @@ const DB = (function(){
     }
   }
 
-  async function loadCritical(onPromoReady){
+  // Ordem de carregamento em fases, para o site aparecer o mais rapido possivel:
+  //  FASE 1 - popup de promocoes + 5 produtos em destaque (consulta dedicada)
+  //           + categorias/highlights. Tudo em paralelo e leve: o popup e o
+  //           carrossel aparecem na hora, sem esperar o catalogo.
+  //  FASE 2 - demais dados leves (usuarios, carrinho, depoimentos, meta).
+  //  FASE 3 - disparada ao fechar o popup (startCatalog): consulta separada dos
+  //           mais visualizados (lista inicial) + restante do catalogo em lotes.
+  async function loadCritical(onPromoReady, onStageReady){
     mem['_loading']=true;
     mem['_loadError']=false;
-    const promoJob = _fetchOne('promos');
-    promoJob.then(function(){
+    const gen = ++_productsLoadGen;
+    _productsComplete=false;
+
+    // FASE 1
+    const promoJob = _fetchOne('promos').then(function(){
       if(typeof onPromoReady==='function'){
         try{onPromoReady();}catch(e){}
       }
       saveCache();
     }).catch(function(){});
-    const jobs = CRITICAL_KEYS.filter(function(k){return k!=='promos'}).map(_fetchOne);
-    jobs.push(loadProducts());
-    jobs.push(loadProductsMeta());
-    await Promise.all(jobs);
-    mem['_loading']=false;
+    await Promise.all([
+      promoJob,
+      _fetchFeaturedProducts(gen),
+      _fetchOne('categories'),
+      _fetchOne('highlights')
+    ]);
+    if(_productsLoadGen!==gen) return;
+    saveCache();
+    if(typeof onStageReady==='function'){
+      try{onStageReady();}catch(e){}
+    }
+
+    // FASE 2
+    await Promise.all([
+      _fetchOne('users'),
+      _fetchOne('cart'),
+      _fetchOne('testimonials'),
+      loadProductsMeta()
+    ]);
     mem['_productsReady']=true;
     saveCache();
   }
@@ -679,6 +703,18 @@ const DB = (function(){
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
   // mem['products'] para nao quebrar a ordem alfabetica do catalogo.
   const PRODUCTS_FEATURED_BATCH = 5;
+  // Ranking de mais visualizados: consulta dedicada, disparada somente quando o
+  // popup de promocoes fecha. Traz uma vitrine inicial enquanto o restante do
+  // catalogo continua chegando em lotes, em segundo plano.
+  const PRODUCTS_TOP_VIEWED = 15;
+  let _topViewed = [];
+  let _topViewedReady = false;
+  let _topViewedFromViews = true;
+  let _topViewedGen = 0;
+  // De onde veio a lista inicial exibida: 'views' (mais visualizados, consulta
+  // separada) ou 'name' (primeiro lote alfabetico, quando o ranking esta vazio).
+  let _catalogSeedMode = null;
+  let _catalogRunningGen = -1;
   let _productsLoadGen = 0;
   let _productsComplete = false;
   let _featuredProducts = [];
@@ -771,30 +807,26 @@ const DB = (function(){
     }catch(e){ console.error('FB load products_meta', e); }
   }
 
-  // Lista fria do catalogo: busca os proximos blocos em ordem alfabetica,
-  // um apos o outro, em segundo plano. Como a ordem de busca e a mesma de
-  // exibicao, cada bloco apenas acrescenta no fim da lista - quem esta
-  // navegando nao ve nada mudar enquanto o restante do catalogo chega.
-  async function _loadProductPages(col, firstDocs, firstLimit, gen, byName){
+  // Lista fria do catalogo: pagina o restante em segundo plano, anexando apenas
+  // o que ainda nao esta em memoria (dedupe por id). Serve tanto para o seed
+  // alfabetico (startAfterDoc = ultimo do primeiro lote) quanto para o seed dos
+  // mais visualizados (startAfterDoc = null, varre do inicio).
+  async function _loadRemainingPages(col, gen, byName, startAfterDoc){
     try{
-      var last = firstDocs[firstDocs.length-1];
-      if(last){
-        var pageCount = firstDocs.length;
-        var limit = firstLimit;
-        while(pageCount===limit){
-          if(_productsLoadGen!==gen) return;
-          limit = PRODUCTS_PAGE_SIZE;
-          const q = byName
-            ? col.orderBy('name').startAfter(last).limit(limit)
-            : col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit);
-          const snap = await q.get();
-          if(_productsLoadGen!==gen) return;
-          if(snap.empty) break;
-          appendProducts(snap.docs.map(function(d){return d.data()}));
-          pageCount = snap.size;
-          last = snap.docs[snap.docs.length-1];
-          try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
-        }
+      var last = startAfterDoc || null;
+      while(true){
+        if(_productsLoadGen!==gen) return;
+        const limit = PRODUCTS_PAGE_SIZE;
+        const q = byName
+          ? (last ? col.orderBy('name').startAfter(last).limit(limit) : col.orderBy('name').limit(limit))
+          : (last ? col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit) : col.orderBy(firebase.firestore.FieldPath.documentId()).limit(limit));
+        const snap = await q.get();
+        if(_productsLoadGen!==gen) return;
+        if(snap.empty) break;
+        appendProducts(snap.docs.map(function(d){return d.data()}));
+        last = snap.docs[snap.docs.length-1];
+        try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+        if(snap.size<limit) break;
       }
       if(_productsLoadGen===gen){
         _productsComplete=true;
@@ -864,40 +896,112 @@ const DB = (function(){
     }
   }
 
+  // Consulta separada (indice simples, campo "views"): os produtos mais
+  // visualizados do site. Esta passa a ser a PRIMEIRA consulta do catalogo,
+  // substituindo o primeiro lote alfabetico: o resultado e exibido na hora.
+  // Se nenhum produto tiver contador ainda, cai para o lote alfabetico. O
+  // restante do catalogo continua chegando em segundo plano (_loadRemainingPages).
+  async function _fetchTopViewed(gen){
+    if(!fire.db){ _topViewedReady=true; return false; }
+    const tgen=++_topViewedGen;
+    try{
+      const col=productsCol();
+      var snap=await col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();
+      if(_topViewedGen!==tgen) return false;
+      var list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
+      if(list.length){
+        _topViewedFromViews=true;
+      }else{
+        _topViewedFromViews=false;
+        snap=await col.orderBy('name').limit(PRODUCTS_TOP_VIEWED).get();
+        if(_topViewedGen!==tgen) return false;
+        list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
+      }
+      _topViewed=list;
+      _topViewedReady=true;
+      if(_productsLoadGen!==gen) return true;
+      // Semeia a grade somente quando ainda nao ha catalogo em memoria (cache).
+      if(!(Array.isArray(mem['products'])&&mem['products'].length)){
+        mem['products']=list.slice();
+        resetProductsBaseline();
+        _catalogSeedMode=_topViewedFromViews?'views':'name';
+        clearProductsError();
+        mem['_loading']=false;
+        saveCache();
+        try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+      }
+      return true;
+    }catch(e){
+      console.error('FB load top viewed', e);
+      _topViewed=[];
+      _topViewedReady=true;
+      return false;
+    }
+  }
+
+  // Contador de visualizacao por produto. Escreve no proprio documento
+  // (incremento atomico) para a consulta de ranking ser sempre uma leitura
+  // simples ordenada. Falhas de permissao sao ignoradas: a vitrine apenas cai
+  // para a ordem alfabetica.
+  async function _addProductView(id){
+    id=String(id||'');
+    if(!id) return;
+    var i, list=Array.isArray(mem['products'])?mem['products']:[];
+    for(i=0;i<list.length;i++){ if(list[i]&&list[i].id===id){ list[i].views=(Number(list[i].views)||0)+1; break; } }
+    for(i=0;i<_featuredProducts.length;i++){ if(_featuredProducts[i]&&_featuredProducts[i].id===id){ _featuredProducts[i].views=(Number(_featuredProducts[i].views)||0)+1; } }
+    for(i=0;i<_topViewed.length;i++){ if(_topViewed[i]&&_topViewed[i].id===id){ _topViewed[i].views=(Number(_topViewed[i].views)||0)+1; } }
+    if(!fire.db) return;
+    try{
+      const col=productsCol();
+      await col.doc(id).set({views: firebase.firestore.FieldValue.increment(1)},{merge:true});
+      clearProductsError();
+    }catch(e){ console.error('FB view increment', e); }
+  }
+
   function resetProductsBaseline(){
     Object.keys(_productsBaseline).forEach(function(k){delete _productsBaseline[k]});
     (Array.isArray(mem['products'])?mem['products']:[]).forEach(function(p){ if(p&&p.id) _productsBaseline[p.id]=JSON.stringify(p); });
   }
 
-  async function loadProducts(){
-    if(!fire.db){ mem['products']=defaultFor('products'); return; }
-    const gen = ++_productsLoadGen;
+  // FASE 3 (segundo plano): garante uma lista inicial (caso ainda nao exista) e
+  // pagina o restante anexando o que falta. Nao e aguardado por quem ja esta
+  // vendo a vitrine/popup.
+  async function _loadCatalog(gen){
+    if(!fire.db){ mem['products']=defaultFor('products'); mem['_loading']=false; return; }
     _productsComplete=false;
-    // Destaques saem em paralelo ao primeiro lote do catalogo: o carrossel
-    // fica completo ja no primeiro render, enquanto a grade comeca pela
-    // letra A e vai recebendo o resto em ordem alfabetica.
-    const featuredJob = _fetchFeaturedProducts(gen);
     try{
       const col = productsCol();
       var byName = true;
-      var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
-      if(first.empty){
-        // Salvaguarda: documento sem o campo "name" nao entra na ordenacao
-        // por nome. Se nenhum veio, varre o catalogo por documentId para a
-        // pagina nao ficar vazia.
-        first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
-        byName = false;
+      var startAfterDoc = null;
+      if(!(Array.isArray(mem['products'])&&mem['products'].length)){
+        // Sem seed (ranking vazio/caminho admin): primeiro lote alfabetico.
+        var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
+        if(first.empty){
+          // Salvaguarda: documento sem o campo "name" nao entra na ordenacao
+          // por nome. Se nenhum veio, varre o catalogo por documentId.
+          first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
+          byName = false;
+        }
+        if(_productsLoadGen!==gen) return;
+        if(!first.empty){
+          mem['products'] = first.docs.map(function(d){return d.data()});
+          resetProductsBaseline();
+          _catalogSeedMode='name';
+          startAfterDoc=first.docs[first.docs.length-1];
+        }
+      }else{
+        // Ja ha seed (mais visualizados): descobre a ordenacao suportada.
+        var probe = await col.orderBy('name').limit(1).get();
+        if(_productsLoadGen!==gen) return;
+        byName = !probe.empty;
       }
-      await featuredJob;
-      if(_productsLoadGen!==gen) return;
-      if(!first.empty){
-        mem['products'] = first.docs.map(function(d){return d.data()});
-        resetProductsBaseline();
-        clearProductsError();
-        _loadProductPages(col, first.docs, PRODUCTS_FIRST_BATCH, gen, byName);
-        _reconcileLegacy(col, gen);
-        return;
-      }
+      clearProductsError();
+      mem['_loading']=false;
+      saveCache();
+      try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+      _loadRemainingPages(col, gen, byName, startAfterDoc);
+      _reconcileLegacy(col, gen);
+      return;
     }catch(e){ console.error('FB load products sub', e); }
     try{
       const ref = fire.db.collection('agrovel_data').doc('products');
@@ -918,6 +1022,7 @@ const DB = (function(){
         recomputeProductsMeta();
         persistProductsMeta();
         clearProductsError();
+        mem['_loading']=false;
         return;
       }
     }catch(e){ console.error('FB load products legacy', e); }
@@ -927,6 +1032,30 @@ const DB = (function(){
       mem['products'] = defaultFor('products');
     }
     mem['_loadError']='products';
+    mem['_loading']=false;
+  }
+
+  // FASE 3 (disparada ao fechar o popup): consulta separada dos mais
+  // visualizados (seed instantaneo) + paginacao do restante em segundo plano.
+  async function startCatalog(){
+    if(!fire.db) return;
+    const gen = _productsLoadGen;
+    if(_catalogRunningGen===gen) return;
+    _catalogRunningGen=gen;
+    _productsComplete=false;
+    await _fetchTopViewed(gen);
+    if(_productsLoadGen!==gen) return;
+    await _loadCatalog(gen);
+  }
+
+  // Caminho independente (admin/retry): destaques + catalogo completo.
+  async function loadProducts(){
+    if(!fire.db){ mem['products']=defaultFor('products'); return; }
+    const gen = ++_productsLoadGen;
+    _productsComplete=false;
+    await _fetchFeaturedProducts(gen);
+    if(_productsLoadGen!==gen) return;
+    await _loadCatalog(gen);
   }
 
   async function flushProducts(){
@@ -995,8 +1124,10 @@ const DB = (function(){
     mem: mem,
     _setFire:function(db){ fire.db=db; },
     _loadAll: loadAll,
-    _loadCritical: function(onPromoReady){ return loadCritical(onPromoReady); },
+    _loadCritical: function(onPromoReady,onStageReady){ return loadCritical(onPromoReady,onStageReady); },
     _loadBackground: function(){ return loadBackground(); },
+    _startCatalog: function(){ return startCatalog(); },
+    addProductView: function(id){ return _addProductView(id); },
     _loadProduct: function(id){ return loadProduct(id); },
     _loadCache: function(){ return loadCache(); },
     _flushAll: flushAll,
@@ -1015,6 +1146,10 @@ const DB = (function(){
     // Buffer proprio com os produtos em destaque (busca dedicada). Exibido no
     // carrossel sem precisar que o catalogo esteja completo.
     featuredProducts(){ return _featuredProducts; },
+    // Buffer com a vitrine inicial de mais visualizados (consulta dedicada).
+    topViewedProducts(){ return _topViewed; },
+    topViewedFromViews(){ return !!_topViewedFromViews; },
+    catalogSeedMode(){ return _catalogSeedMode; },
     productsMeta(){
       const m=mem['products_meta'];
       if(m&&typeof m.total==='number') return m;
@@ -1047,19 +1182,19 @@ const DB = (function(){
       return true;
     },
     filters(){
-      // Padrao do catalogo: ordem alfabetica.
-      var def={category:'',species:'',brand:'',search:'',sort:'alpha'};
+      // Padrao do catalogo: MAIS VISUALIZADOS (a consulta inicial separada).
+      var def={category:'',species:'',brand:'',search:'',sort:'views'};
       try{
         var raw=localStorage.getItem('agrovel_filters');
         if(raw){
           var f=Object.assign({},def,JSON.parse(raw));
-          // Migracao unica: "Destaques" era o padrao antigo. Quem nunca
-          // escolheu outra ordem passa a abrir em ordem alfabetica; quem ja
-          // escolheu depois da migracao mantem a escolha.
-          if(localStorage.getItem('agrovel_sort_migrated')!=='1'){
-            if(!f.sort||f.sort==='featured') f.sort='alpha';
+          // Migracao unica: o padrao passou a ser a lista de mais visualizados,
+          // carregada por uma consulta propria e exibida de imediato.
+          if(localStorage.getItem('agrovel_sort_migrated2')!=='1'){
+            f.sort='views';
             try{ localStorage.setItem('agrovel_filters', JSON.stringify(f)); }catch(e){}
-            localStorage.setItem('agrovel_sort_migrated','1');
+            localStorage.setItem('agrovel_sort_migrated2','1');
+            try{ localStorage.setItem('agrovel_sort_migrated','1'); }catch(e){}
           }
           return f;
         }
@@ -1067,7 +1202,7 @@ const DB = (function(){
       return def;
     },
     setFilters(v){
-      try{ localStorage.setItem('agrovel_filters', JSON.stringify(v||{category:'',species:'',brand:'',search:'',sort:'alpha'})); }catch(e){}
+      try{ localStorage.setItem('agrovel_filters', JSON.stringify(v||{category:'',species:'',brand:'',search:'',sort:'views'})); }catch(e){}
       return true;
     },
     promos(){return this.g('promos')||[]},
@@ -1308,13 +1443,13 @@ function buildNavHash(){
   if(f.species) parts.push('sp='+encodeURIComponent(f.species));
   if(f.brand) parts.push('b='+encodeURIComponent(f.brand));
   if(f.search) parts.push('q='+encodeURIComponent(f.search));
-  if(f.sort&&f.sort!=='alpha') parts.push('o='+encodeURIComponent(f.sort));
+  if(f.sort&&f.sort!=='views') parts.push('o='+encodeURIComponent(f.sort));
   return '#'+parts.join('&');
 }
 
 function parseNavHash(){
   var h=(location.hash||'').replace(/^#/,'');
-  var noFilters={category:'',species:'',brand:'',search:'',sort:'alpha'};
+  var noFilters={category:'',species:'',brand:'',search:'',sort:'views'};
   if(!h) return null;
   if(h.indexOf('post=')===0) return {state:{view:'blog-post',newsId:decodeURIComponent(h.slice(5))},filters:noFilters};
   var p={};
@@ -1333,7 +1468,7 @@ function parseNavHash(){
     if(p.bs!==undefined) st.blogSearch=p.bs||'';
   }
   if(p.v==='confirmation'&&p.id) st.orderId=p.id;
-  return {state:st,filters:{category:p.c||'',species:p.sp||'',brand:p.b||'',search:p.q||'',sort:p.o||'alpha'}};
+  return {state:st,filters:{category:p.c||'',species:p.sp||'',brand:p.b||'',search:p.q||'',sort:p.o||'views'}};
 }
 
 function applyNavState(parsed,opts){
@@ -1383,7 +1518,7 @@ window.addEventListener('popstate',function(){
   else _appNavDepth=0;
   var parsed=parseNavHash();
   if(parsed) applyNavState(parsed);
-  else applyNavState({state:{view:'catalog'},filters:{category:'',species:'',brand:'',search:'',sort:'alpha'}});
+  else applyNavState({state:{view:'catalog'},filters:{category:'',species:'',brand:'',search:'',sort:'views'}});
 });
 
 function render(){
@@ -1860,6 +1995,32 @@ function resultCount(filtered){
   return filtered.length;
 }
 
+// Contagem REAL de visualizacoes por produto, derivada dos eventos de
+// analytics (product_view) registrados em trackEvent(). O campo "views" nos
+// documentos do catalogo normalmente nao existe (as regras publicas do
+// Firestore bloqueiam escrita nos produtos), entao o Firestore nao consegue
+// ordenar por ele. Os eventos sao a fonte confiavel para o ranking.
+function productViewCounts(){
+  var map={};
+  try{
+    var ev=DB.events();
+    if(Array.isArray(ev)){
+      ev.forEach(function(e){
+        if(e&&e.type==='product_view'&&e.productId){
+          map[e.productId]=(map[e.productId]||0)+1;
+        }
+      });
+    }
+  }catch(e){}
+  return map;
+}
+function productViewScore(p,counts){
+  if(!p||!p.id) return 0;
+  var fromEvents=(counts&&counts[p.id])||0;
+  var fromField=Number(p.views)||0;
+  return fromEvents>fromField?fromEvents:fromField;
+}
+
 function getFilteredProducts(){
   const filters=DB.filters();
   const products=DB.products().filter(function(p){return p.active});
@@ -1874,12 +2035,16 @@ function getFilteredProducts(){
       return haystack.indexOf(term)>=0;
     });
   }
-  // Ordem alfabetica e o padrao (inclusive para valores antigos/invalidos).
-  // Ela usa o mesmo comparador da busca no Firestore, entao a ordem da tela
-  // e identica a ordem de chegada dos lotes: nada pula de lugar na grade.
+  // Padrao: MAIS VISUALIZADOS. Usa a contagem real dos eventos product_view
+  // (campo "views" como fallback), com desempate alfabetico. Quando nao ha
+  // nenhuma visualizacao registrada, cai para a ordem alfabetica.
   if(filters.sort==='rating') filtered.sort(function(a,b){return b.rating-a.rating});
   else if(filters.sort==='newest') filtered.sort(function(a,b){return new Date(b.createdAt)-new Date(a.createdAt)});
   else if(filters.sort==='featured') filtered.sort(function(a,b){return(b.featured?1:0)-(a.featured?1:0)});
+  else if(filters.sort==='views'){
+    var counts=productViewCounts();
+    filtered.sort(function(a,b){var d=productViewScore(b,counts)-productViewScore(a,counts);return d!==0?d:compareByName(a,b)});
+  }
   else filtered.sort(compareByName);
   return filtered;
 }
@@ -1962,7 +2127,7 @@ function syncCatalogGrid(filtered){
     const grid=document.getElementById('catalog-grid');
     if(!grid) return false;
     const f=DB.filters();
-    if(f.category||f.species||f.brand||f.search||f.sort!=='alpha') return false;
+    if(f.category||f.species||f.brand||f.search||(f.sort!=='alpha'&&f.sort!=='views')) return false;
     const target=Math.min(catalogVisibleCount,filtered.length);
     const have=grid.children.length;
     if(have>target) return false;
@@ -1994,6 +2159,29 @@ function loadMoreProducts(){
 
 var _productsGrewPending=false;
 var _productRenderPending=false;
+var _deferredProductsStarted=false;
+
+// Disparado uma unica vez, ao fechar o popup de promocoes (ou quando nao ha
+// popup): roda a consulta separada dos mais visualizados (lista inicial) e
+// depois pagina o restante do catalogo, em segundo plano.
+function startDeferredProductsLoad(){
+  if(_deferredProductsStarted) return;
+  _deferredProductsStarted=true;
+  try{ DB._startCatalog(); }catch(e){}
+}
+
+// Cabecalho da "sessao" inicial enquanto a grade mostra os mais visualizados e
+// o restante do catalogo ainda esta chegando.
+function catalogSeedHeaderHTML(){
+  if(DB.catalogSeedMode()!=='views'||DB.productsComplete()) return '';
+  if((DB.filters()||{}).sort!=='views') return '';
+  if(!(DB.topViewedProducts()||[]).length) return '';
+  return '<div class="flex flex-wrap items-center justify-between gap-2 mb-5">'+
+    '<h2 class="text-lg md:text-2xl font-bold text-gray-800"><i class="fas fa-fire text-amber-500 mr-2"></i>Mais visualizados</h2>'+
+    '<span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin mr-1"></i>carregando cat&aacute;logo completo...</span>'+
+  '</div>';
+}
+
 function notifyProductsGrew(){
   if(State.view==='product'){
     var id=State.productId;
@@ -2091,6 +2279,7 @@ function renderCatalog(){
       '</div>'+
       '<select id="sort-select" onchange="updateSort(this.value)"'+
         ' class="px-4 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 outline-none cursor-pointer">'+
+        '<option value="views" '+(filters.sort==='views'?'selected':'')+'>Mais visualizados</option>'+
         '<option value="alpha" '+(filters.sort==='alpha'?'selected':'')+'>Ordem Alfab&eacute;tica</option>'+
         '<option value="featured" '+(filters.sort==='featured'?'selected':'')+'>Destaques</option>'+
         '<option value="newest" '+(filters.sort==='newest'?'selected':'')+'>Mais Recentes</option>'+
@@ -2110,6 +2299,7 @@ function renderCatalog(){
           (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
         '</div>':'')+
 
+        catalogSeedHeaderHTML()+
          '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium mb-2 block">Carregando produtos do cat&aacute;logo...</span><div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>':catalogResultsCountHTML(filtered))+'</p>'+
 
         (filtered.length===0?(DB.isLoading()&&!DB.loadError()?loadingCatalogGrid():
@@ -2265,8 +2455,8 @@ function updateSort(val){const f=DB.filters();f.sort=val;DB.setFilters(f);syncNa
 function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;if(next){f.species='';f.brand='';catalogSpeciesOpen=true;catalogBrandOpen=true;}DB.setFilters(f);syncNavHash();render()}
 function toggleSpecies(s){const f=DB.filters();const next=f.species===s?'':s;if(next)trackEvent('filter',{kind:'species',value:s});f.species=next;DB.setFilters(f);syncNavHash();render()}
 function toggleBrand(b){const f=DB.filters();const next=f.brand===b?'':b;if(next)trackEvent('filter',{kind:'brand',value:b});f.brand=next;DB.setFilters(f);syncNavHash();render()}
-function clearFilters(){resetCatalogFilterUI();DB.setFilters({category:'',species:'',brand:'',search:'',sort:'alpha'});syncNavHash();render()}
-function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});catalogShowAllCats=false;catalogSpeciesOpen=true;catalogBrandOpen=true;DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'alpha'});navigate('catalog')}
+function clearFilters(){resetCatalogFilterUI();DB.setFilters({category:'',species:'',brand:'',search:'',sort:'views'});syncNavHash();render()}
+function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});catalogShowAllCats=false;catalogSpeciesOpen=true;catalogBrandOpen=true;DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'views'});navigate('catalog')}
 function submitContactForm(){
   const name=document.getElementById('contact-name').value.trim();
   const phone=document.getElementById('contact-phone').value.trim();
@@ -2301,6 +2491,7 @@ function renderProductDetail(id){
     return'<div class="text-center py-20"><p>Produto não encontrado</p><button onclick="navigate(\'catalog\')" class="mt-4 bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar</button></div>';
   }
   trackEvent('product_view',{productId:p.id,name:p.name,brand:p.brand||'',category:p.category});
+  try{ DB.addProductView(p.id); }catch(e){}
   const discount=p.originalPrice?Math.round((1-p.price/p.originalPrice)*100):0;
   const related=DB.products().filter(function(x){return x.active&&x.category===p.category&&x.id!==p.id}).slice(0,4);
   const mf=focalOf(p,0);
@@ -4817,6 +5008,9 @@ function promoOverlayHtml(p){
 var _promoAutoShown=false;
 function markPromoDataReady(){
   showPromoPopup();
+  // Sem popup ativo na tela (nenhuma promocao ou ja consumido): nada segura o
+  // usuario, entao dispara a vitrine de mais visualizados imediatamente.
+  if(!document.getElementById('promo-popup')) startDeferredProductsLoad();
 }
 function showPromoPopup(force){
   var promos=DB.promos();
@@ -4890,6 +5084,8 @@ function showPromoPopup(force){
 function closePromoPopup(){
   var dv=document.getElementById('promo-popup');
   if(dv)dv.remove();
+  // Fim do popup: hora de buscar e exibir os produtos mais visualizados.
+  startDeferredProductsLoad();
 }
 
 // ============================================================
@@ -6348,9 +6544,18 @@ function refreshData(showToastOnError){
     },8000);
   }
   var productId=State.view==='product'?State.productId:'';
-  return DB._loadCritical(markPromoDataReady).then(function(){
+  // FASE 1 concluida (popup + carrossel): renderiza sem esperar o catalogo.
+  function onStageReady(){
+    if(State.view==='catalog'){
+      if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+      else render();
+    }else if(State.view==='blog'||State.view==='blog-post'||State.view==='admin'){
+      render();
+    }
+    renderCategoryNavs();
+  }
+  return DB._loadCritical(markPromoDataReady,onStageReady).then(function(){
     if(slowTimer){clearTimeout(slowTimer);slowTimer=null;}
-    DB.setLoading(false);
     if(State.view==='catalog'){
       if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
       else render();
@@ -6381,15 +6586,21 @@ async function retryCatalogLoad(){
     DB.setLoading(true);
     DB._clearLoadError();
     await refreshData(true);
+    // Reinicia a FASE 3 (mais visualizados + restante do catalogo).
+    try{ DB._startCatalog(); }catch(e){}
   }catch(e){
     console.error('Firebase retry error',e);
     DB._markLoadError('init');
   }
-  DB.setLoading(false);
+  // Se o catalogo ainda esta carregando em segundo plano, mantem o skeleton;
+  // o primeiro lote libera a tela automaticamente via notifyProductsGrew().
+  if(DB.loadError()) DB.setLoading(false);
   if(State.view==='catalog'||State.view==='product'||State.view==='admin') render();
   else navigate('catalog');
   if(btn) btn.disabled=false;
-  DB._loadBackground().catch(function(){});
+  DB._loadBackground().then(function(){
+    if(State.view==='catalog'&&(DB.filters()||{}).sort==='views') notifyProductsGrew();
+  }).catch(function(){});
 }
 
 // ============================================================
@@ -6420,8 +6631,11 @@ window.addEventListener('DOMContentLoaded', async function(){
     try{
       ensureFirebaseApp();
       DB._setFire(firebase.firestore());
-      markPromoDataReady();
+      // Inicia a FASE 1 (incrementa a geracao do catalogo) ANTES de marcar os
+      // dados de promocao, para a FASE 3 (mais visualizados + restante) rodar
+      // na mesma geracao.
       refreshData(false); // atualiza em background, sem travar a navegacao
+      markPromoDataReady();
     }catch(e){
       console.error('Firebase init error', e);
       DB._markLoadError('init');
@@ -6448,6 +6662,9 @@ window.addEventListener('DOMContentLoaded', async function(){
   DB._loadBackground().then(function(){
     renderCategoryNavs();
     if(State.view==='blog'||State.view==='blog-post'||State.view==='admin') render();
+    // Eventos (product_view) chegaram: se o catalogo esta ordenado por "mais
+    // visualizados", re-renderiza para aplicar o ranking real.
+    else if(State.view==='catalog'&&(DB.filters()||{}).sort==='views') notifyProductsGrew();
   }).catch(function(){});
 });
 </script>
