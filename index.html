@@ -551,8 +551,10 @@ const DB = (function(){
   //           + categorias/highlights. Tudo em paralelo e leve: o popup e o
   //           carrossel aparecem na hora, sem esperar o catalogo.
   //  FASE 2 - demais dados leves (usuarios, carrinho, depoimentos, meta).
-  //  FASE 3 - disparada ao fechar o popup (startCatalog): consulta separada dos
-  //           mais visualizados (lista inicial) + restante do catalogo em lotes.
+  //  FASE 3 - iniciada em segundo plano ASSIM QUE A FASE 1 termina (sem esperar
+  //           o usuario fechar o popup): consulta separada dos mais visualizados
+  //           (lista inicial) + restante do catalogo em lotes. Quando o popup
+  //           fecha, a vitrine ja esta pronta por tras dele.
   async function loadCritical(onPromoReady, onStageReady){
     mem['_loading']=true;
     mem['_loadError']=false;
@@ -577,6 +579,12 @@ const DB = (function(){
     if(typeof onStageReady==='function'){
       try{onStageReady();}catch(e){}
     }
+
+    // FASE 3 em segundo plano: nao aguardada e nao bloqueada pelo popup. Roda
+    // em paralelo com a FASE 2 para que os mais visualizados + catalogo cheguem
+    // enquanto o usuario ainda esta vendo as promocoes. (startCatalog e
+    // idempotente por geracao: fechar o popup depois vira no-op.)
+    startCatalog();
 
     // FASE 2
     await Promise.all([
@@ -1035,8 +1043,9 @@ const DB = (function(){
     mem['_loading']=false;
   }
 
-  // FASE 3 (disparada ao fechar o popup): consulta separada dos mais
-  // visualizados (seed instantaneo) + paginacao do restante em segundo plano.
+  // FASE 3 (disparada em segundo plano ao terminar a FASE 1, sem esperar o
+  // popup): consulta separada dos mais visualizados (seed instantaneo) +
+  // paginacao do restante. Idempotente por geracao.
   async function startCatalog(){
     if(!fire.db) return;
     const gen = _productsLoadGen;
@@ -2119,26 +2128,58 @@ function syncCatalogCounters(filtered){
 }
 
 // Anexa em segundo plano os produtos que terminaram de carregar, sem
-// reconstruir a grade. So e permitido quando a lista visivel nao mudou de
-// conteudo (mesma ordem alfabetica, sem filtro ativo): se qualquer card tivesse
-// que trocar de lugar, devolvemos false e quem chamou re-renderiza por completo.
+// reconstruir a grade. O caminho rapido so acrescenta cards no fim (quando a
+// ordem visivel nao mudou). Quando a ordem muda (ex.: ordem por visualizacoes
+// com novos produtos entrando no meio), refaz a grade por RECONCILIACAO
+// diferencial: os cards ja desenhados sao reaproveitados e apenas movidos,
+// entao imagens nao recarregam e a tela nao pisca.
 function syncCatalogGrid(filtered){
   try{
     const grid=document.getElementById('catalog-grid');
     if(!grid) return false;
-    const f=DB.filters();
-    if(f.category||f.species||f.brand||f.search||(f.sort!=='alpha'&&f.sort!=='views')) return false;
+    if(!filtered||!filtered.length) return false;
     const target=Math.min(catalogVisibleCount,filtered.length);
     const have=grid.children.length;
-    if(have>target) return false;
-    if(catalogDomKey(filtered,have)!==window._catalogDomKey) return false;
-    if(have<target){
-      grid.insertAdjacentHTML('beforeend',filtered.slice(have,target).map(function(p){return renderProductCard(p)}).join(''));
-      window._catalogDomKey=catalogDomKey(filtered,target);
+    // Caminho rapido: lista visivel intacta, apenas anexa o que falta.
+    if(have<=target&&catalogDomKey(filtered,have)===window._catalogDomKey){
+      if(have<target){
+        grid.insertAdjacentHTML('beforeend',filtered.slice(have,target).map(function(p){return renderProductCard(p)}).join(''));
+        window._catalogDomKey=catalogDomKey(filtered,target);
+      }
+      syncCatalogCounters(filtered);
+      return true;
     }
+    // Reconciliacao diferencial: reaproveita os cards existentes por id.
+    reconcileCatalogGrid(grid,filtered.slice(0,target));
+    window._catalogDomKey=catalogDomKey(filtered,target);
     syncCatalogCounters(filtered);
     return true;
   }catch(e){ return false; }
+}
+
+// Monta a grade desejada reaproveitando os elementos ja na tela (chave por
+// data-pid). Elementos que continuam aparecendo apenas sao movidos de lugar;
+// so cria card novo para produto que ainda nao estava visivel.
+function reconcileCatalogGrid(grid,shown){
+  const existing={};
+  while(grid.firstChild){
+    const el=grid.firstChild;
+    const id=el.getAttribute?el.getAttribute('data-pid'):null;
+    grid.removeChild(el);
+    if(id&&!existing[id]) existing[id]=el;
+  }
+  const frag=document.createDocumentFragment();
+  shown.forEach(function(p){
+    let el=existing[p.id];
+    if(el) delete existing[p.id];
+    else{
+      const tmp=document.createElement('div');
+      tmp.innerHTML=renderProductCard(p);
+      el=tmp.firstElementChild;
+    }
+    if(el) frag.appendChild(el);
+  });
+  grid.appendChild(frag);
 }
 
 function loadMoreProducts(){
@@ -2161,9 +2202,9 @@ var _productsGrewPending=false;
 var _productRenderPending=false;
 var _deferredProductsStarted=false;
 
-// Disparado uma unica vez, ao fechar o popup de promocoes (ou quando nao ha
-// popup): roda a consulta separada dos mais visualizados (lista inicial) e
-// depois pagina o restante do catalogo, em segundo plano.
+// Disparado ao fechar o popup (ou quando nao ha popup): garante que a FASE 3
+// rode. Normalmente a FASE 3 ja foi iniciada em segundo plano ao terminar a
+// FASE 1, entao aqui costuma ser no-op; e o fallback de seguranca.
 function startDeferredProductsLoad(){
   if(_deferredProductsStarted) return;
   _deferredProductsStarted=true;
@@ -2176,7 +2217,7 @@ function catalogSeedHeaderHTML(){
   if(DB.catalogSeedMode()!=='views'||DB.productsComplete()) return '';
   if((DB.filters()||{}).sort!=='views') return '';
   if(!(DB.topViewedProducts()||[]).length) return '';
-  return '<div class="flex flex-wrap items-center justify-between gap-2 mb-5">'+
+  return '<div id="catalog-seed-header" class="flex flex-wrap items-center justify-between gap-2 mb-5">'+
     '<h2 class="text-lg md:text-2xl font-bold text-gray-800"><i class="fas fa-fire text-amber-500 mr-2"></i>Mais visualizados</h2>'+
     '<span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin mr-1"></i>carregando cat&aacute;logo completo...</span>'+
   '</div>';
@@ -2210,8 +2251,15 @@ function notifyProductsGrew(){
     _productsGrewPending=true;
     setTimeout(function(){
       _productsGrewPending=false;
-      if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot')){
-        try{ renderAdminSection(); }catch(e){}
+      if(State.view==='admin'){
+        // Produtos: atualizacao incremental (append de linhas novas), sem
+        // remontar a secao - evita a piscada da tela a cada lote do banco.
+        if(State.adminSection==='products'){
+          try{ if(!syncAdminProducts()) renderAdminSection(); }catch(e){}
+        }
+        else if(State.adminSection==='dashboard'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot'){
+          try{ renderAdminSection(); }catch(e){}
+        }
       }
     },0);
   }
@@ -2221,8 +2269,13 @@ function notifyProductsFullyLoaded(){
     if(!DB.products().some(function(p){return p.id===State.productId})) render();
   }
   else if(State.view==='catalog'&&document.getElementById('catalog-grid-area')) updateCatalogResults(true);
-  else if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot')){
-    try{ renderAdminSection(); }catch(e){}
+  else if(State.view==='admin'){
+    if(State.adminSection==='products'){
+      try{ if(!syncAdminProducts()) renderAdminSection(); }catch(e){}
+    }
+    else if(State.adminSection==='dashboard'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot'){
+      try{ renderAdminSection(); }catch(e){}
+    }
   }
 }
 function notifyProductsMetaLoaded(){
@@ -2242,8 +2295,13 @@ function notifyProductsMetaLoaded(){
       render();
     }
   }
-  else if(State.view==='admin'&&(State.adminSection==='dashboard'||State.adminSection==='products'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot')){
-    try{ renderAdminSection(); }catch(e){}
+  else if(State.view==='admin'){
+    if(State.adminSection==='products'){
+      try{ if(!syncAdminProducts()) renderAdminSection(); }catch(e){}
+    }
+    else if(State.adminSection==='dashboard'||State.adminSection==='categories'||State.adminSection==='highlights'||State.adminSection==='copilot'){
+      try{ renderAdminSection(); }catch(e){}
+    }
   }
 }
 
@@ -2355,18 +2413,31 @@ function updateCatalogResults(keepPage){
   var cw=document.getElementById('catalog-carousel-wrap');
   // Novos destaques podem ter chegado depois do primeiro render (o catalogo e
   // carregado em lotes no Firestore). Se o carrossel visivel nao mostra mais
-  // todos os destaques do catalogo, re-renderiza a pagina inteira para
-  // atualiza-lo sem depender de navegacao.
+  // todos os destaques do catalogo, atualiza APENAS o carrossel - re-renderizar
+  // a pagina inteira aqui apagava e remontava os produtos ja visiveis, fazendo
+  // a tela inteira piscar a cada lote novo.
   if(cw&&(cw.style.display!=='none')){
     var featured=getCarouselHighlights();
     if(featured.length!==cw.querySelectorAll('.carousel-slide').length){
-      render();
-      return;
+      cw.innerHTML=renderFeaturedCarousel(featured);
+      featInit();
     }
   }
   if(!keepPage) resetCatalogPagination();
 
   if(cw) cw.style.display=(filters.category||filters.search||filters.species||filters.brand)?'none':'block';
+
+  // Cabecalho "Mais visualizados" da carga inicial: some sozinho quando o
+  // catalogo termina de chegar, sem precisar remontar a area inteira.
+  try{
+    var seedWanted=catalogSeedHeaderHTML();
+    var seedEl=document.getElementById('catalog-seed-header');
+    if(seedEl&&!seedWanted) seedEl.parentNode.removeChild(seedEl);
+    else if(!seedEl&&seedWanted){
+      var seedCnt=document.getElementById('catalog-results-count');
+      if(seedCnt) seedCnt.insertAdjacentHTML('beforebegin',seedWanted);
+    }
+  }catch(e){}
 
   var aside=document.getElementById('catalog-filters-aside');
   if(aside) aside.classList.toggle('hidden',!!(filters.search));
@@ -2397,7 +2468,7 @@ function updateCatalogResults(keepPage){
 }
 
 function renderProductCard(p){
-  return'<div class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
+  return'<div data-pid="'+p.id+'" class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
     '<div class="relative overflow-hidden h-52 bg-white">'+
       imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'6%',lazy:true})+
       (p.featured?'<div class="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-star mr-1"></i>Destaque</div>':'')+
@@ -4069,13 +4140,35 @@ function initDashboardCharts(){
 // ============================================================
 // ADMIN: PRODUCTS
 // ============================================================
+function adminProductRowHTML(p){
+  const u=DB.currentUser();
+  return'<tr class="border-b border-gray-50 hover:bg-green-50/30 transition-colors" data-pid="'+p.id+'" data-name="'+p.name.toLowerCase()+'" data-category="'+p.category+'">'+
+    '<td class="px-5 py-4"><div class="flex items-center gap-3">'+
+      '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(p.images[0],p,0,p.name)+'</div>'+
+      '<div><div class="font-medium text-gray-900 text-sm">'+p.name+'</div><div class="text-xs text-gray-400">SKU: '+p.sku+'</div></div></div></td>'+
+    '<td class="px-5 py-4"><span class="text-xs bg-green-100 text-green-700 px-2.5 py-1 rounded-full font-medium">'+p.category+'</span></td>'+
+    '<td class="px-5 py-4"><div class="font-bold text-green-700 text-sm">'+fmt(p.price)+'</div>'+(p.originalPrice?'<div class="text-xs text-gray-400 line-through">'+fmt(p.originalPrice)+'</div>':'')+'</td>'+
+    '<td class="px-5 py-4">'+
+      '<input type="number" value="'+p.stock+'" min="0" onchange="updateStock(\''+p.id+'\',this.value)" class="w-16 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:border-green-500 outline-none text-center">'+
+      (p.stock<=3?'<span class="ml-1 text-xs text-red-500 font-medium">baixo</span>':'')+
+    '</td>'+
+    '<td class="px-5 py-4">'+
+      '<button onclick="toggleProductActive(\''+p.id+'\')" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors '+(p.active?'bg-green-100 text-green-700 hover:bg-green-200':'bg-red-100 text-red-700 hover:bg-red-200')+'">'+(p.active?'Ativo':'Inativo')+'</button>'+
+    '</td>'+
+    '<td class="px-5 py-4"><div class="flex items-center justify-center gap-2">'+
+      '<button onclick="navigate(\'product\',{productId:\''+p.id+'\'})" title="Ver" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><i class="fas fa-eye text-sm"></i></button>'+
+      (u.role==='admin'?'<button onclick="startProductForm(\''+p.id+'\')" title="Editar" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"><i class="fas fa-edit text-sm"></i></button>'+
+      '<button onclick="deleteProduct(\''+p.id+'\')" title="Excluir" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"><i class="fas fa-trash text-sm"></i></button>':'')+
+    '</div></td>'+
+  '</tr>';
+}
+
 function renderAdminProducts(){
   const products=DB.products();
   const u=DB.currentUser();
-  const canEdit=u.role==='admin'||u.role==='seller';
   return'<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
-      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Produtos</h1><p class="text-gray-400 text-sm">'+DB.productsMeta().total+(DB.productsComplete()?'':' + carregando')+' produtos cadastrados</p></div>'+
+      '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Produtos</h1><p id="admin-products-count" class="text-gray-400 text-sm">'+adminProductsCountText()+'</p></div>'+
       (u.role==='admin'?'<button onclick="startProductForm(null)" class="bg-green-600 hover:bg-green-500 text-white font-bold px-5 py-2.5 rounded-xl transition-colors flex items-center gap-2 text-sm"><i class="fas fa-plus"></i>Novo Produto</button>':'')+
     '</div>'+
     '<div class="flex flex-col sm:flex-row gap-3 mb-5">'+
@@ -4097,29 +4190,43 @@ function renderAdminProducts(){
           '<th class="px-5 py-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">Acoes</th></tr>'+
         '</thead>'+
         '<tbody id="products-tbody">'+
-          products.map(function(p){return '<tr class="border-b border-gray-50 hover:bg-green-50/30 transition-colors" data-name="'+p.name.toLowerCase()+'" data-category="'+p.category+'">'+
-            '<td class="px-5 py-4"><div class="flex items-center gap-3">'+
-              '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(p.images[0],p,0,p.name)+'</div>'+
-              '<div><div class="font-medium text-gray-900 text-sm">'+p.name+'</div><div class="text-xs text-gray-400">SKU: '+p.sku+'</div></div></div></td>'+
-            '<td class="px-5 py-4"><span class="text-xs bg-green-100 text-green-700 px-2.5 py-1 rounded-full font-medium">'+p.category+'</span></td>'+
-            '<td class="px-5 py-4"><div class="font-bold text-green-700 text-sm">'+fmt(p.price)+'</div>'+(p.originalPrice?'<div class="text-xs text-gray-400 line-through">'+fmt(p.originalPrice)+'</div>':'')+'</td>'+
-            '<td class="px-5 py-4">'+
-              '<input type="number" value="'+p.stock+'" min="0" onchange="updateStock(\''+p.id+'\',this.value)" class="w-16 px-2 py-1 border border-gray-200 rounded-lg text-sm focus:border-green-500 outline-none text-center">'+
-              (p.stock<=3?'<span class="ml-1 text-xs text-red-500 font-medium">baixo</span>':'')+
-            '</td>'+
-            '<td class="px-5 py-4">'+
-              '<button onclick="toggleProductActive(\''+p.id+'\')" class="text-xs px-3 py-1.5 rounded-full font-medium transition-colors '+(p.active?'bg-green-100 text-green-700 hover:bg-green-200':'bg-red-100 text-red-700 hover:bg-red-200')+'">'+(p.active?'Ativo':'Inativo')+'</button>'+
-            '</td>'+
-            '<td class="px-5 py-4"><div class="flex items-center justify-center gap-2">'+
-              '<button onclick="navigate(\'product\',{productId:\''+p.id+'\'})" title="Ver" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors"><i class="fas fa-eye text-sm"></i></button>'+
-              (u.role==='admin'?'<button onclick="startProductForm(\''+p.id+'\')" title="Editar" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-green-600 hover:bg-green-50 transition-colors"><i class="fas fa-edit text-sm"></i></button>'+
-              '<button onclick="deleteProduct(\''+p.id+'\')" title="Excluir" class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors"><i class="fas fa-trash text-sm"></i></button>':'')+
-            '</div></td>'+
-          '</tr>'}).join('')+
+          products.map(adminProductRowHTML).join('')+
         '</tbody>'+
       '</table>'+
     '</div>'+
   '</div>';
+}
+
+function adminProductsCountText(){
+  return DB.productsMeta().total+(DB.productsComplete()?'':' + carregando')+' produtos cadastrados';
+}
+
+// Atualizacao INCREMENTAL da tabela de produtos do admin: enquanto os lotes do
+// Firestore chegam em segundo plano, apenas as linhas novas sao anexadas. A
+// secao inteira nao e remontada (o que reapontava a animacao fade-in e fazia a
+// tela piscar a cada lote).
+function syncAdminProducts(){
+  const tbody=document.getElementById('products-tbody');
+  if(!tbody) return false;
+  const products=DB.products();
+  const rows=Array.prototype.slice.call(tbody.querySelectorAll('tr[data-pid]'));
+  let appendOnly=rows.length<=products.length;
+  if(appendOnly){
+    for(let i=0;i<rows.length;i++){
+      if(rows[i].getAttribute('data-pid')!==String(products[i]&&products[i].id)){appendOnly=false;break;}
+    }
+  }
+  if(appendOnly){
+    if(rows.length<products.length){
+      tbody.insertAdjacentHTML('beforeend',products.slice(rows.length).map(adminProductRowHTML).join(''));
+    }
+  }else{
+    tbody.innerHTML=products.map(adminProductRowHTML).join('');
+  }
+  const cnt=document.getElementById('admin-products-count');
+  if(cnt) cnt.textContent=adminProductsCountText();
+  try{ filterAdminProducts(); }catch(e){}
+  return true;
 }
 
 function filterAdminProducts(val){
@@ -5008,8 +5115,8 @@ function promoOverlayHtml(p){
 var _promoAutoShown=false;
 function markPromoDataReady(){
   showPromoPopup();
-  // Sem popup ativo na tela (nenhuma promocao ou ja consumido): nada segura o
-  // usuario, entao dispara a vitrine de mais visualizados imediatamente.
+  // Sem popup ativo na tela (nenhuma promocao ou ja consumido): garante que a
+  // vitrine seja iniciada imediatamente (fallback; a FASE 3 ja roda em background).
   if(!document.getElementById('promo-popup')) startDeferredProductsLoad();
 }
 function showPromoPopup(force){
@@ -5084,7 +5191,7 @@ function showPromoPopup(force){
 function closePromoPopup(){
   var dv=document.getElementById('promo-popup');
   if(dv)dv.remove();
-  // Fim do popup: hora de buscar e exibir os produtos mais visualizados.
+  // Fim do popup: a vitrine ja carregou em segundo plano; garante o start (fallback).
   startDeferredProductsLoad();
 }
 
