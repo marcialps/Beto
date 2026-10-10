@@ -198,8 +198,8 @@
           <button onclick="toggleMobileMenu()" class="md:hidden text-white text-xl p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="Menu">
             <i class="fas fa-bars"></i>
           </button>
-          <button onclick="navigate('catalog')" class="flex items-center gap-3 transition-all duration-300 hover:scale-105 p-2 rounded-2xl hover:bg-white/10">
-            <img src="img/logo.gif" alt="Agrovel" class="h-24 md:h-32 w-auto logo-glow" width="128" height="128" fetchpriority="high">
+          <button onclick="navigate('catalog')" class="flex items-center gap-3 transition-all duration-300 hover:scale-105 p-2 rounded-2xl hover:bg-white/10 overflow-hidden">
+            <img src="img/logo.webp" alt="Agrovel" class="h-22 md:h-28 w-auto logo-glow" width="128" height="128" fetchpriority="high">
           </button>
         </div>
         <nav class="hidden md:flex items-center gap-6 text-sm">
@@ -233,7 +233,7 @@
   <footer id="public-footer" class="bg-green-900 text-green-200 mt-16">
     <div class="max-w-7xl mx-auto px-4 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
       <div>
-        <img src="img/logo.gif" alt="Agrovel" class="h-10 w-auto mb-3" width="40" height="40" loading="lazy">
+        <img src="img/logo.webp" alt="Agrovel" class="h-10 w-auto mb-3" width="40" height="40" loading="lazy">
         <p class="text-sm leading-relaxed"><strong class="text-white">Mais que Produtos, Soluções.</strong> Soluções inteligentes e completas para o seu campo e seus animais. Medicamentos, nutrição e tecnologia com garantia de procedência e padrão ouro de qualidade.</p>
       </div>
       <div>
@@ -547,7 +547,7 @@ const DB = (function(){
   }
 
   // Ordem de carregamento em fases, para o site aparecer o mais rapido possivel:
-  //  FASE 1 - popup de promocoes + 5 produtos em destaque (consulta dedicada)
+  //  FASE 1 - popup de promocoes + 7 produtos em destaque (consulta dedicada)
   //           + categorias/highlights. Tudo em paralelo e leve: o popup e o
   //           carrossel aparecem na hora, sem esperar o catalogo.
   //  FASE 2 - demais dados leves (usuarios, carrinho, depoimentos, meta).
@@ -1712,7 +1712,7 @@ function getCarouselHighlights(){
   // feitas no painel depois que o buffer foi montado (ligar/desligar destaque).
   try{ DB.featuredProducts().forEach(function(p){ add(byId[p.id]||p); }); }catch(e){}
   DB.products().forEach(add);
-  products=products.slice(0,5);
+  products=products.slice(0,7);
   var items=products.map(function(p){return{type:'product',p:p}});
   var camps=(DB.highlights()||[]).filter(function(h){return h&&h.active});
   camps.forEach(function(c){items.push({type:'campaign',c:c})});
@@ -2984,7 +2984,7 @@ function renderLogin(){
   return'<div class="min-h-screen flex items-center justify-center px-4 py-16 fade-in">'+
     '<div class="w-full max-w-md">'+
       '<div class="text-center mb-8">'+
-        '<img src="img/logo.gif" alt="Agrovel" class="h-14 w-auto mx-auto mb-3">'+
+        '<img src="img/logo.webp" alt="Agrovel" class="h-14 w-auto mx-auto mb-3">'+
         '<p class="text-gray-500 mt-2">Mais que Produtos, Soluções</p>'+
       '</div>'+
       '<div class="bg-white rounded-2xl shadow-sm border border-green-100 p-8">'+
@@ -3565,7 +3565,7 @@ function renderTestimonialsSection(){
 function renderAbout(){
   return '<div class="max-w-5xl mx-auto px-4 py-10 md:py-16 fade-in">'+
     '<section class="text-center mb-12">'+
-      '<img src="img/logo.gif" alt="Agrovel" class="h-16 md:h-20 w-auto mx-auto mb-6">'+
+      '<img src="img/logo.webp" alt="Agrovel" class="h-16 md:h-20 w-auto mx-auto mb-6">'+
       '<div class="inline-flex items-center gap-2 bg-amber-500 text-green-950 px-4 py-1.5 rounded-full text-sm font-bold mb-4 shadow"><i class="fas fa-medal"></i> Desde 1996 &bull; Iju&iacute; - RS</div>'+
       '<h1 class="text-3xl md:text-5xl font-bold text-gray-900 mb-4">Mais que Produtos, <span class="text-green-700">Solu&ccedil;&otilde;es.</span></h1>'+
       '<p class="text-gray-600 max-w-2xl mx-auto text-base md:text-lg leading-relaxed">Há 30 anos a Agrovel Agroveterinária caminha lado a lado com o produtor rural, o criador e quem cuida dos animais. Oferecemos medicamentos veterinários, nutrição animal, equipamentos e insumos com procedência garantida e atendimento técnico especializado.</p>'+
@@ -3667,7 +3667,7 @@ function renderAdmin(){
     '<aside class="admin-sidebar w-64 bg-green-900 flex flex-col flex-shrink-0 h-screen">'+
       '<div class="p-5 border-b border-green-800 flex items-center justify-between">'+
           '<button onclick="navigate(\'catalog\')" class="flex items-center gap-3 text-white hover:opacity-80 transition-opacity">'+
-          '<img src="img/logo.gif" alt="Agrovel" class="h-9 w-auto">'+
+          '<img src="img/logo.webp" alt="Agrovel" class="h-9 w-auto">'+
           '<div><div class="font-bold text-sm">Agrovel</div><div class="text-green-400 text-xs">Painel Admin</div></div>'+
         '</button>'+
         '<button onclick="closeAdminSidebar()" class="md:hidden text-green-400 hover:text-white text-lg"><i class="fas fa-times"></i></button>'+
@@ -4873,7 +4873,7 @@ function deletePromo(id){
 
 // ============================================================
 // ADMIN: DESTAQUES (carrossel da home)
-// Produtos em destaque (max. 5) + campanhas fora do catalogo
+// Produtos em destaque (max. 7) + campanhas fora do catalogo
 // ============================================================
 function toggleSwitchHtml(on,onclick){
   return '<button type="button" onclick="'+onclick+'" title="'+(on?'Clique para desligar':'Clique para ligar')+'"'+
@@ -4896,12 +4896,12 @@ function toggleHighlightProduct(id){
   var on=!p.featured;
   if(on){
     var cnt=featuredProductCount(id);
-    if(cnt>=5){showToast('Limite de 5 produtos em destaque atingido. Desligue um para ligar outro.','error');return}
+    if(cnt>=7){showToast('Limite de 7 produtos em destaque atingido. Desligue um para ligar outro.','error');return}
   }
   p.featured=on;
   DB.setProducts(products);
   var onCount=featuredProductCount(null);
-  showToast(on?('Produto marcado como destaque ('+onCount+'/5).'):'Produto removido dos destaques','info');
+  showToast(on?('Produto marcado como destaque ('+onCount+'/7).'):'Produto removido dos destaques','info');
   renderAdminSection();
 }
 
@@ -4933,14 +4933,14 @@ function renderAdminHighlights(){
   return '<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">'+
       '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900"><i class="fas fa-star text-amber-500 mr-2"></i>Destaques</h1>'+
-      '<p class="text-gray-400 text-sm">Controle os produtos em destaque e crie campanhas que aparecem no carrossel da home (m\u00e1ximo de 5 produtos ligados).</p></div>'+
+      '<p class="text-gray-400 text-sm">Controle os produtos em destaque e crie campanhas que aparecem no carrossel da home (m\u00e1ximo de 7 produtos ligados).</p></div>'+
     '</div>'+
     '<div class="bg-white rounded-2xl p-4 md:p-5 shadow-sm border border-gray-100 mb-6 flex flex-col sm:flex-row sm:items-center justify-between gap-3">'+
       '<div class="flex items-center gap-3">'+
         '<div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 flex items-center justify-center"><i class="fas fa-toggle-on text-lg"></i></div>'+
-        '<div><div class="text-sm font-bold '+(overLimit?'text-red-600':'text-gray-800')+'">'+onCount+' de 5 produtos em destaque'+(overLimit?' (excedido)':'')+'</div>'+
+        '<div><div class="text-sm font-bold '+(overLimit?'text-red-600':'text-gray-800')+'">'+onCount+' de 7 produtos em destaque'+(overLimit?' (excedido)':'')+'</div>'+
         (overLimit
-          ?'<div class="text-xs text-red-500">Excede o limite de 5. Desligue '+(onCount-5)+' produto'+(onCount-5===1?'':'s')+' para voltar ao limite.</div>'
+          ?'<div class="text-xs text-red-500">Excede o limite de 7. Desligue '+(onCount-7)+' produto'+(onCount-7===1?'':'s')+' para voltar ao limite.</div>'
           :'<div class="text-xs text-gray-400">'+fills+' vaga'+(fills===1?'':'s')+' restante'+(fills===1?'':'s')+'</div>')+'</div>'+
       '</div>'+
       '<div class="flex gap-1.5">'+bars+'</div>'+
@@ -4972,7 +4972,7 @@ function renderAdminHighlights(){
         '<h3 class="font-bold text-gray-800">'+(State.editingHighlight?'Editar Campanha':'Nova Campanha (destaque fora do cat\u00e1logo)')+'</h3>'+
         (State.editingHighlight?'<button onclick="cancelEditHighlight()" class="text-xs text-gray-500 hover:text-gray-800 border border-gray-200 px-3 py-1.5 rounded-lg transition-colors">Cancelar edi\u00e7\u00e3o</button>':'')+
       '</div>'+
-      '<p class="text-sm text-gray-500 mb-4">Campanhas s\u00e3o exibidas apenas no carrossel de destaques da home, com imagem e texto pr\u00f3prios. N\u00e3o contam para o limite de 5 produtos.</p>'+
+      '<p class="text-sm text-gray-500 mb-4">Campanhas s\u00e3o exibidas apenas no carrossel de destaques da home, com imagem e texto pr\u00f3prios. N\u00e3o contam para o limite de 7 produtos.</p>'+
       '<div class="flex items-center gap-3 mb-4">'+
         '<span class="text-sm text-gray-600">Ativa</span>'+
         '<input id="hl-active" type="checkbox" class="w-5 h-5 rounded accent-green-500 cursor-pointer">'+
@@ -6198,9 +6198,9 @@ function saveProduct(e,id){
     var featured=wantFeatured;
     if(wantFeatured){
       var featuredCount=featuredProductCount(id);
-      if(featuredCount>=5){
+      if(featuredCount>=7){
         featured=false;
-        showToast('Limite de 5 produtos em destaque atingido. Destaque n\u00e3o marcado. Desligue um em Destaques > Produtos.','warn');
+        showToast('Limite de 7 produtos em destaque atingido. Destaque n\u00e3o marcado. Desligue um em Destaques > Produtos.','warn');
       }
     }
     const data={
