@@ -50,6 +50,12 @@
   .whatsapp-float:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(37,211,102,.5)}
   .logo-glow{filter:drop-shadow(0 2px 6px rgba(0,0,0,.3));transition:all .3s ease}
   .logo-glow:hover{filter:drop-shadow(0 4px 14px rgba(0,0,0,.45));transform:scale(1.18)}
+  /* Search Autocomplete */
+  #search-autocomplete{max-height:360px;overflow-y:auto}
+  #search-autocomplete button:first-child{border-top:none}
+  #search-autocomplete button:focus{background:#f0fdf4;outline:none}
+  #search-autocomplete mark{padding:0 2px;border-radius:2px}
+  #search-autocomplete img{border-radius:6px}
   .carousel{position:relative;overflow:hidden}
   .carousel-track{display:flex;transition:transform .6s cubic-bezier(.65,0,.35,1)}
   .carousel-slide{flex:0 0 100%;min-width:100%}
@@ -2390,11 +2396,12 @@ function renderCatalog(){
         '<i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"></i>'+
         '<input id="search-input" type="text" placeholder="Buscar na Agrovel..." value="'+(filters.search||'')+'"'+
           ' class="w-full pl-11 pr-10 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 focus:ring-2 focus:ring-green-200 outline-none transition-all"'+
-          ' oninput="updateSearch(this.value)">'+
+          ' oninput="updateSearch(this.value)" onkeydown="handleSearchKeydown(event)" autocomplete="off">'+
         '<button id="search-clear" onclick="clearSearch()" title="Limpar busca" style="display:'+(filters.search?'flex':'none')+'"'+
           ' class="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 items-center justify-center rounded-full hover:bg-gray-100 transition-colors">'+
           '<i class="fas fa-times text-gray-400 text-xs"></i>'+
         '</button>'+
+        '<div id="search-autocomplete" class="absolute z-50 w-full mt-1 bg-white border border-green-200 rounded-xl shadow-lg hidden overflow-hidden"></div>'+
       '</div>'+
       '<select id="sort-select" onchange="updateSort(this.value)"'+
         ' class="px-4 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 outline-none cursor-pointer">'+
@@ -2580,9 +2587,135 @@ function updateSearch(val){
 function clearSearch(){
   const input=document.getElementById('search-input');
   if(input) input.value='';
+  hideSearchAutocomplete();
   updateSearch('');
   if(document.getElementById('search-input'))document.getElementById('search-input').focus();
 }
+
+function showSearchAutocomplete(val){
+  const input=document.getElementById('search-input');
+  const dropdown=document.getElementById('search-autocomplete');
+  if(!input||!dropdown) return;
+  
+  const term=val.toLowerCase().trim();
+  if(term.length<2){
+    hideSearchAutocomplete();
+    return;
+  }
+  
+  const products=DB.products().filter(function(p){return p.active});
+  const matches=products.filter(function(p){
+    const haystack=[p.name,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' ')].join(' ').toLowerCase();
+    return haystack.indexOf(term)>=0;
+  }).slice(0,8);
+  
+  if(matches.length===0){
+    hideSearchAutocomplete();
+    return;
+  }
+  
+  dropdown.innerHTML=matches.map(function(p){
+    return '<button type="button" onclick="selectAutocompleteProduct(\''+p.id+'\')" '+
+      'class="w-full px-4 py-3 text-left hover:bg-green-50 transition-colors flex items-center gap-3 border-t border-green-100">'+
+      '<div class="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center overflow-hidden flex-shrink-0">'+
+        (p.images&&p.images[0]?'<img src="'+p.images[0]+'" alt="" class="w-full h-full object-cover">':'<i class="fas fa-box text-green-400 text-xl"></i>')+
+      '</div>'+
+      '<div class="flex-1 min-w-0">'+
+        '<div class="font-medium text-gray-800 truncate">'+highlightMatch(p.name,term)+'</div>'+
+        '<div class="text-xs text-gray-500 flex items-center gap-2 mt-0.5">'+
+          '<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full">'+p.category+'</span>'+
+          (p.brand?'<span class="bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">'+p.brand+'</span>':'')+
+          (p.species?'<span class="bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full"><i class="fas fa-paw mr-0.5"></i>'+p.species+'</span>':'')+
+        '</div>'+
+      '</div>'+
+      '<i class="fas fa-chevron-right text-gray-300 text-sm"></i>'+
+    '</button>';
+  }).join('');
+  
+  dropdown.classList.remove('hidden');
+}
+
+function hideSearchAutocomplete(){
+  const dropdown=document.getElementById('search-autocomplete');
+  if(dropdown) dropdown.classList.add('hidden');
+}
+
+function highlightMatch(text,term){
+  if(!term) return text;
+  const regex=new RegExp('('+term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');
+  return text.replace(regex,'<mark class="bg-amber-200 text-amber-900">$1</mark>');
+}
+
+function selectAutocompleteProduct(pid){
+  const p=DB.products().find(function(x){return x.id===pid});
+  if(!p) return;
+  hideSearchAutocomplete();
+  const input=document.getElementById('search-input');
+  if(input) input.value=p.name;
+  updateSearch(p.name);
+  setTimeout(function(){
+    navigate('product',{productId:pid});
+  },50);
+}
+
+function handleSearchKeydown(e){
+  const dropdown=document.getElementById('search-autocomplete');
+  if(!dropdown||dropdown.classList.contains('hidden')) return;
+  const items=dropdown.querySelectorAll('button');
+  if(!items.length) return;
+  const active=dropdown.querySelector('button:focus');
+  let index=active?Array.from(items).indexOf(active):-1;
+  if(e.key==='ArrowDown'){
+    e.preventDefault();
+    index=Math.min(index+1,items.length-1);
+    items[index].focus();
+  }else if(e.key==='ArrowUp'){
+    e.preventDefault();
+    index=Math.max(index-1,0);
+    items[index].focus();
+  }else if(e.key==='Enter'&&active){
+    e.preventDefault();
+    active.click();
+  }else if(e.key==='Escape'){
+    hideSearchAutocomplete();
+    document.getElementById('search-input').blur();
+  }
+}
+
+function updateSearch(val){
+  const f=DB.filters();
+  f.search=val;
+  DB.setFilters(f);
+  const clearBtn=document.getElementById('search-clear');
+  if(clearBtn) clearBtn.style.display=val?'flex':'none';
+  if(val&&val.trim().length>=2)trackSearch(val.trim());
+  showSearchAutocomplete(val);
+  clearTimeout(window._st);
+  window._st=setTimeout(function(){
+    if(State.view!=='catalog') return;
+    if(document.getElementById('catalog-grid-area')){
+      updateCatalogResults();
+    } else {
+      render();
+    }
+    syncNavHash();
+  },300);
+}
+
+document.addEventListener('click',function(e){
+  const dropdown=document.getElementById('search-autocomplete');
+  const input=document.getElementById('search-input');
+  if(dropdown&&input&&!dropdown.contains(e.target)&&e.target!==input){
+    hideSearchAutocomplete();
+  }
+});
+
+document.addEventListener('keydown',function(e){
+  if(e.target&&e.target.id==='search-input'){
+    handleSearchKeydown(e);
+  }
+});
+
 function updateSort(val){const f=DB.filters();f.sort=val;DB.setFilters(f);syncNavHash();render()}
 function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;if(next){f.species='';f.brand='';catalogSpeciesOpen=true;catalogBrandOpen=true;}DB.setFilters(f);syncNavHash();render()}
 function toggleSpecies(s){const f=DB.filters();const next=f.species===s?'':s;if(next)trackEvent('filter',{kind:'species',value:s});f.species=next;DB.setFilters(f);syncNavHash();render()}
