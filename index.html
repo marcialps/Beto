@@ -1039,14 +1039,30 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
   // FASE 3 (segundo plano): garante uma lista inicial (caso ainda nao exista) e
   // pagina o restante anexando o que falta. Nao e aguardado por quem ja esta
   // vendo a vitrine/popup.
-  async function _loadCatalog(gen){
+  // seedInfo: opcional { list, startAfterDoc, byName } vindo de _fetchFirstAlphaBatch
+  async function _loadCatalog(gen, seedInfo){
     if(!fire.db){ mem['products']=defaultFor('products'); mem['_loading']=false; return; }
     _productsComplete=false;
     try{
       const col = productsCol();
       var byName = true;
       var startAfterDoc = null;
-      if(!(Array.isArray(mem['products'])&&mem['products'].length)){
+
+      // Se ja temos seed (de _fetchTopViewed ou _fetchFirstAlphaBatch), pula o primeiro lote
+      // e usa o startAfterDoc/byName do seedInfo para continuar a paginacao.
+      const hasSeed = Array.isArray(mem['products']) && mem['products'].length > 0;
+
+      if(!hasSeed && seedInfo && seedInfo.list && seedInfo.list.length > 0){
+        // Seed do lote alfabetico (caso _fetchTopViewed nao tenha semeado)
+        mem['products'] = seedInfo.list.slice();
+        resetProductsBaseline();
+        _catalogSeedMode = 'name';
+        byName = seedInfo.byName;
+        startAfterDoc = seedInfo.startAfterDoc;
+        hasSeed = true;
+      }
+
+      if(!hasSeed){
         // Sem seed (ranking vazio/caminho admin): primeiro lote alfabetico.
         var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
         if(first.empty){
@@ -1062,8 +1078,9 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
           _catalogSeedMode='name';
           startAfterDoc=first.docs[first.docs.length-1];
         }
-      }else{
-        // Ja ha seed (mais visualizados): descobre a ordenacao suportada.
+      }else if(!seedInfo || !seedInfo.byName){
+        // Ja ha seed (mais visualizados ou lote alfabetico ja aplicado):
+        // descobre a ordenacao suportada se nao veio do seedInfo.
         var probe = await col.orderBy('name').limit(1).get();
         if(_productsLoadGen!==gen) return;
         byName = !probe.empty;
@@ -1108,6 +1125,28 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     mem['_loading']=false;
   }
 
+  // Busca o primeiro lote alfabetico em paralelo com _fetchTopViewed.
+  // Retorna { list, startAfterDoc, byName } sem escrever em mem['products'].
+  async function _fetchFirstAlphaBatch(gen){
+    if(!fire.db) return { list: [], startAfterDoc: null, byName: true };
+    const col = productsCol();
+    try{
+      var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
+      var byName = true;
+      if(first.empty){
+        first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
+        byName = false;
+      }
+      if(_productsLoadGen!==gen) return { list: [], startAfterDoc: null, byName: true };
+      const list = first.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id});
+      const startAfterDoc = first.empty ? null : first.docs[first.docs.length-1];
+      return { list, startAfterDoc, byName };
+    }catch(e){
+      console.error('FB fetch first alpha batch', e);
+      return { list: [], startAfterDoc: null, byName: true };
+    }
+  }
+
   // FASE 3 (disparada em segundo plano ao terminar a FASE 1, sem esperar o
   // popup): consulta separada dos mais visualizados (seed instantaneo) +
   // paginacao do restante. Idempotente por geracao.
@@ -1117,9 +1156,28 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     if(_catalogRunningGen===gen) return;
     _catalogRunningGen=gen;
     _productsComplete=false;
-    await _fetchTopViewed(gen);
+
+    const [topViewedResult, alphaBatchResult] = await Promise.all([
+      _fetchTopViewed(gen),
+      _fetchFirstAlphaBatch(gen)
+    ]);
+
     if(_productsLoadGen!==gen) return;
-    await _loadCatalog(gen);
+
+    // Decide qual seed usar: prioridade para 'views' (ja tratado dentro de _fetchTopViewed),
+    // senao usa o lote alfabetico se _fetchTopViewed nao semeou nada.
+    const hasTopViewedSeed = _topViewed && _topViewed.length > 0;
+    if(!hasTopViewedSeed && alphaBatchResult.list.length > 0){
+      mem['products'] = alphaBatchResult.list.slice();
+      resetProductsBaseline();
+      _catalogSeedMode = 'name';
+      clearProductsError();
+      mem['_loading'] = false;
+      saveCache();
+      try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+    }
+
+    await _loadCatalog(gen, alphaBatchResult);
   }
 
   // Caminho independente (admin/retry): destaques + catalogo completo.
