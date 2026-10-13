@@ -1623,6 +1623,20 @@ function applyNavState(parsed,opts){
     if(st.orderId!==undefined) State.orderId=st.orderId;
   }
   if(parsed&&parsed.filters) DB.setFilters(parsed.filters);
+  
+  if(st && st.view === 'product' && st.productId) {
+    var cachedProduct = DB.products().find(function(x){return x.id===st.productId});
+    if(!cachedProduct && DB.fire.db) {
+      var mc = document.getElementById('main-content');
+      mc.innerHTML = '<div class="max-w-7xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
+      DB._loadProduct(st.productId).then(function(){
+        render();
+      });
+      if(opts.scroll!==false) window.scrollTo({top:0,behavior:'smooth'});
+      return;
+    }
+  }
+  
   render();
   if(opts.scroll!==false) window.scrollTo({top:0,behavior:'smooth'});
 }
