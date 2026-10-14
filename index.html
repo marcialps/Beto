@@ -716,7 +716,7 @@ const DB = (function(){
   // carrossel abrir ja completo (ate 5 slides) em vez de 1/5 enquanto o
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
   // mem['products'] para nao quebrar a ordem alfabetica do catalogo.
-  const PRODUCTS_FEATURED_BATCH = 5;
+  const PRODUCTS_FEATURED_BATCH = 7;
   // Ranking de mais visualizados: consulta dedicada, disparada somente quando o
   // popup de promocoes fecha. Traz uma vitrine inicial enquanto o restante do
   // catalogo continua chegando em lotes, em segundo plano.
@@ -1628,7 +1628,7 @@ function applyNavState(parsed,opts){
     var cachedProduct = DB.products().find(function(x){return x.id===st.productId});
     if(!cachedProduct && DB.fire.db) {
       var mc = document.getElementById('main-content');
-      mc.innerHTML = '<div class="max-w-7xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
+      mc.innerHTML = '<div class="max-w-7xl mx-auto px-4 py-24 text-center"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
       DB._loadProduct(st.productId).then(function(){
         render();
       });
@@ -2822,9 +2822,9 @@ function renderProductDetail(id){
   const p=DB.products().find(function(x){return x.id===id});
   if(!p){
     if(DB.productLoadError(id)||(DB.loadError()&&!DB.productsComplete())){
-      return '<div class="max-w-7xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-exclamation-triangle text-4xl text-amber-500"></i><p class="text-gray-600 font-medium">Não foi possível carregar o produto. Verifique sua conexão e tente novamente.</p><button onclick="retryCatalogLoad()" class="bg-green-600 hover:bg-green-500 text-white px-6 py-3 rounded-xl font-medium">Tentar novamente</button></div></div>';
+      return '<div class="max-w-7xl mx-auto px-4 py-24 text-center"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-exclamation-triangle text-4xl text-amber-500"></i><p class="text-gray-600 font-medium">Não foi possível carregar o produto. Verifique sua conexão e tente novamente.</p><button onclick="retryCatalogLoad()" class="bg-green-600 hover:bg-green-500 text-white px-6 py-3 rounded-xl font-medium">Tentar novamente</button></div></div>';
     }
-    if(!DB.productsComplete()) return '<div class="max-w-7xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
+    if(!DB.productsComplete()) return '<div class="max-w-7xl mx-auto px-4 py-24 text-center"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
     return'<div class="text-center py-20"><p>Produto não encontrado</p><button onclick="navigate(\'catalog\')" class="mt-4 bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar</button></div>';
   }
   trackEvent('product_view',{productId:p.id,name:p.name,brand:p.brand||'',category:p.category});
@@ -2832,7 +2832,7 @@ function renderProductDetail(id){
   const discount=p.originalPrice?Math.round((1-p.price/p.originalPrice)*100):0;
   const related=DB.products().filter(function(x){return x.active&&x.category===p.category&&x.id!==p.id}).slice(0,4);
   const mf=focalOf(p,0);
-  return'<div class="max-w-7xl mx-auto px-4 py-6 md:py-10 fade-in">'+
+  return'<div class="max-w-7xl mx-auto px-4 py-6 md:py-10">'+
     '<nav class="text-xs md:text-sm text-gray-500 mb-4 md:mb-6 flex items-center gap-2 flex-wrap">'+
       (_appNavDepth>0?'<button onclick="goAppBack()" class="inline-flex items-center gap-1.5 hover:text-green-700 font-semibold"><i class="fas fa-arrow-left text-xs"></i>Voltar</button><i class="fas fa-chevron-right text-xs"></i>':'')+
       '<button onclick="navigate(\'catalog\')" class="hover:text-green-700">Inicio</button>'+
