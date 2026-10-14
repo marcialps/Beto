@@ -2212,9 +2212,23 @@ function loadingCatalogGrid(){
   return '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+cards+'</div>';
 }
 
+function catalogProgressHTML(filtered){
+  const n=resultCount(filtered);
+  if(n===0) return '';
+  const loaded=DB.products().length;
+  if(loaded>=n) return '';
+  const pct=Math.min(100,Math.round((loaded/n)*100));
+  return '<span style="display:inline-flex;align-items:center;gap:10px;margin-left:8px">'+
+    '<span style="display:inline-block;width:120px;height:8px;background:#e5e7eb;border-radius:99px;overflow:hidden;vertical-align:middle">'+
+      '<span style="display:block;height:100%;width:'+pct+'%;background:linear-gradient(90deg,#22c55e,#34d399);border-radius:99px;transition:width 0.7s ease-out"></span>'+
+    '</span>'+
+    '<span style="font-size:11px;font-weight:700;color:#15803d;white-space:nowrap">'+loaded+' / '+n+' &middot; '+pct+'%</span>'+
+  '</span>';
+}
+
 function catalogResultsCountHTML(filtered){
   const n=resultCount(filtered);
-  return '<strong class="text-gray-800">'+n+'</strong> produto'+(n!==1?'s':'')+' encontrado'+(n!==1?'s':'')+(DB.productsComplete()?'':' <span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin"></i> carregando mais...</span>');
+  return '<strong class="text-gray-800">'+n+'</strong> produto'+(n!==1?'s':'')+' encontrado'+(n!==1?'s':'')+' '+catalogProgressHTML(filtered);
 }
 
 function loadMoreWrapHTML(filtered){
@@ -2358,7 +2372,6 @@ function catalogSeedHeaderHTML(){
   if(!(DB.topViewedProducts()||[]).length) return '';
   return '<div id="catalog-seed-header" class="flex flex-wrap items-center justify-between gap-2 mb-5">'+
     '<h2 class="text-lg md:text-2xl font-bold text-gray-800"><i class="fas fa-fire text-amber-500 mr-2"></i>Mais visualizados</h2>'+
-    //'<span class="text-xs text-green-700 font-medium"><i class="fas fa-spinner fa-spin mr-1"></i>carregando cat&aacute;logo completo...</span>'+
   '</div>';
 }
 
@@ -2497,8 +2510,7 @@ function renderCatalog(){
           (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
         '</div>':'')+
 
-        catalogSeedHeaderHTML()+
-         '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium mb-2 block">Carregando produtos do cat&aacute;logo...</span><div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>':catalogResultsCountHTML(filtered))+'</p>'+
+        '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium mb-2 block">Carregando produtos do cat&aacute;logo...</span><div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>':catalogResultsCountHTML(filtered))+'</p>'+
 
         (filtered.length===0?(DB.isLoading()&&!DB.loadError()?loadingCatalogGrid():
         '<div class="text-center py-20">'+
@@ -2589,12 +2601,15 @@ function updateCatalogResults(keepPage){
   // remontar a grade - os cards ja na tela nao piscam nem mudam de lugar.
   if(syncCatalogGrid(filtered)) return;
 
+  var existingCount=document.getElementById('catalog-results-count');
+  if(existingCount){
+    existingCount.innerHTML=catalogResultsCountHTML(filtered);
+  }
   var html=((filters.category||filters.species||filters.brand||filters.search)?'<div class="flex items-center flex-wrap gap-2 mb-5">'+
     (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
     (filters.species?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-paw text-xs"></i>'+filters.species+'<button onclick="toggleSpecies(\''+filters.species+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
     (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
   '</div>':'')+
-  '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+catalogResultsCountHTML(filtered)+'</p>'+
   (filtered.length===0?'<div class="text-center py-20">'+
     '<div class="text-6xl mb-4">🔍</div>'+
     '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
