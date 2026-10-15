@@ -86,6 +86,12 @@
   .testimonials-carousel{padding-bottom:32px}
   @keyframes progressIndeterminate{0%{left:-40%;width:40%}50%{left:30%;width:50%}100%{left:100%;width:40%}}
   .progress-bar-indeterminate{animation:progressIndeterminate 1.4s ease-in-out infinite}
+  /* Loader do catalogo: logo Agrovel (animada) com anel girando e brilho pulsante */
+  .catalog-loader{position:relative;display:inline-flex;align-items:center;justify-content:center;width:210px;height:190px}
+  .catalog-loader-ring{position:absolute;top:50%;left:50%;width:186px;height:186px;margin:-93px 0 0 -93px;border-radius:50%;border:4px solid rgba(22,163,74,.15);border-top-color:#16a34a;animation:catalogLoaderSpin 1.05s linear infinite}
+  .catalog-loader-logo{position:relative;width:140px;max-width:58vw;height:auto;animation:catalogLoaderGlow 1.6s ease-in-out infinite}
+  @keyframes catalogLoaderSpin{to{transform:rotate(360deg)}}
+  @keyframes catalogLoaderGlow{0%,100%{filter:drop-shadow(0 2px 6px rgba(22,163,74,.15));opacity:.85}50%{filter:drop-shadow(0 6px 18px rgba(22,163,74,.45));opacity:1}}
   .img-chip{position:relative;width:88px;height:88px;border-radius:12px;overflow:hidden;border:2px solid #d1fae5;box-shadow:0 1px 4px rgba(0,0,0,.1)}
   .img-chip img{width:100%;height:100%;object-fit:cover;display:block}
   .img-chip .del-chip{position:absolute;top:3px;right:3px;width:20px;height:20px;border-radius:50%;background:rgba(220,38,38,.9);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;opacity:0;transition:opacity .2s}
@@ -530,7 +536,20 @@ const DB = (function(){
         });
       });
     }
-    return {get:get,put:put};
+    function del(key){
+      return open().then(function(db){
+        return new Promise(function(resolve,reject){
+          try{
+            const tx=db.transaction(STORE,'readwrite');
+            tx.objectStore(STORE).delete(key);
+            tx.oncomplete=function(){ resolve(); };
+            tx.onerror=function(){ reject(tx.error); };
+            tx.onabort=function(){ reject(tx.error); };
+          }catch(e){ reject(e); }
+        });
+      });
+    }
+    return {get:get,put:put,del:del};
   })();
 
   // Converte Timestamp do Firestore / {seconds,nanoseconds} / Date / number em ms.
@@ -551,8 +570,36 @@ const DB = (function(){
   let _cacheSync=null;
   let _idbSaveTimer=null;
 
-  // Parte leve (chaves pequenas + meta) no localStorage, de forma sincrona
-  // para estar sempre salva; o catalogo completo vai para o IndexedDB.
+  // --- Catalogo no IndexedDB em blocos (chunks) ---
+  // O catalogo e salvo em blocos de IDB_CHUNK_SIZE produtos:
+  // - a leitura inicial carrega o primeiro bloco e ja libera a primeira tela;
+  // - a gravacao marca apenas os blocos que mudaram (append, edicao de um
+  //   produto etc.), em vez de reescrever o catalogo inteiro (varios MB) a
+  //   cada saveCache() - inclusive quando o usuario so abriu um produto.
+  const IDB_CHUNK_SIZE=1000;
+  const IDB_META_KEY='catalog_meta';
+  const IDB_LEGACY_KEY='catalog';
+  let _idbChunkCount=0;               // quantidade de blocos atualmente salvos
+  let _idbDirtyChunks=null;           // Set de indices de blocos alterados (-1 = todos)
+  let _idbSaving=false;
+  let _idbLegacyPending=false;        // cache no formato antigo aguardando migracao
+
+  function _idbMarkDirty(from,to){
+    if(!fire.db && !mem['products']) return;
+    if(!_idbDirtyChunks) _idbDirtyChunks=new Set();
+    if(from===undefined||from<0){ _idbDirtyChunks.add(-1); return; }
+    if(_idbDirtyChunks.has(-1)) return;
+    if(to===undefined) to=from+1;
+    for(var i=from;i<to;i++) _idbDirtyChunks.add(Math.floor(i/IDB_CHUNK_SIZE));
+  }
+
+  // Marcador central de mudanca do catalogo: marca os blocos do IndexedDB
+  // afetados e invalida os caches derivados da tela (filtro/ordenacao).
+  function _markProductsChanged(fromIdx,toIdx){
+    _bumpProductsVersion();
+    _idbMarkDirty(fromIdx===undefined?-1:fromIdx, toIdx);
+  }
+
   function saveCache(){
     try{
       var data={v:LOCAL_CACHE_VER,ts:Date.now()};
@@ -563,20 +610,41 @@ const DB = (function(){
     _scheduleIdbSave();
   }
   function _scheduleIdbSave(){
+    if(!_idbDirtyChunks||!_idbDirtyChunks.size) return;
     if(_idbSaveTimer) return;
     _idbSaveTimer=setTimeout(function(){ _idbSaveTimer=null; _saveIdbCatalog(); },400);
   }
-  function _saveIdbCatalog(){
+  async function _saveIdbCatalog(){
     if(_idbSaveTimer){ clearTimeout(_idbSaveTimer); _idbSaveTimer=null; }
+    if(_idbSaving) return; // a rodada em andamento re-agenda ao terminar
+    if(!_idbDirtyChunks||!_idbDirtyChunks.size) return;
+    const list=Array.isArray(mem['products'])?mem['products']:[];
+    const chunks=Math.ceil(list.length/IDB_CHUNK_SIZE);
+    const dirty=_idbDirtyChunks; _idbDirtyChunks=null;
+    const all=dirty.has(-1);
+    _idbSaving=true;
     try{
-      _idb.put('catalog',{
-        products:Array.isArray(mem['products'])?mem['products']:[],
-        sync:_cacheSync||null,
-        ts:Date.now()
-      }).catch(function(){});
-    }catch(e){}
+      for(var c=0;c<chunks;c++){
+        if(!all&&!dirty.has(c)) continue;
+        await _idb.put('catalog_c'+c, list.slice(c*IDB_CHUNK_SIZE,(c+1)*IDB_CHUNK_SIZE));
+      }
+      // Meta por ultimo: so aponta para blocos ja gravados.
+      await _idb.put(IDB_META_KEY,{sync:_cacheSync||null,ts:Date.now(),count:list.length,chunks:chunks});
+      for(var d=chunks;d<_idbChunkCount;d++){ try{ await _idb.del('catalog_c'+d); }catch(e){} }
+      _idbChunkCount=chunks;
+      if(_idbLegacyPending){
+        _idbLegacyPending=false;
+        try{ await _idb.del(IDB_LEGACY_KEY); }catch(e){}
+      }
+    }catch(e){
+      // Falhou: marca tudo de novo para a proxima tentativa nao perder nada.
+      _idbMarkDirty(-1);
+    }finally{
+      _idbSaving=false;
+      if(_idbDirtyChunks&&_idbDirtyChunks.size) _scheduleIdbSave();
+    }
   }
-  async function loadCache(){
+  async function loadCache(onPartial){
     var has=false;
     try{
       var raw=localStorage.getItem(LOCAL_CACHE_KEY);
@@ -589,20 +657,66 @@ const DB = (function(){
         }
       }
     }catch(e){}
+    var partialCalls=0;
+    function notifyPartial(){
+      if(partialCalls>=2) return;
+      partialCalls++;
+      try{ if(typeof onPartial==='function') onPartial(); }catch(e){}
+    }
     try{
-      var rec=await _idb.get('catalog');
-      if(rec&&Array.isArray(rec.products)&&rec.products.length&&has){
-        mem['products']=rec.products;
-        if(rec.sync){
-          _cacheSync={
-            rev:(rec.sync.rev===undefined?null:rec.sync.rev),
-            wm:Number(rec.sync.wm)||0,
-            ts:Number(rec.sync.ts)||Number(rec.ts)||0
-          };
-          mem['products_rev']=_cacheSync.rev;
-          mem['products_wm']=_cacheSync.wm;
+      var meta=await _idb.get(IDB_META_KEY);
+      if(meta&&typeof meta.chunks==='number'&&meta.chunks>0&&has){
+        // Formato em blocos: entrega o primeiro bloco (primeira tela) e segue
+        // lendo o restante sem bloquear a interface.
+        var list=[];
+        var okAll=true;
+        for(var c=0;c<meta.chunks;c++){
+          if(_productsLoadGen!==0) break; // carga de rede ja assumiu: nao sobrescrever
+          var rec=await _idb.get('catalog_c'+c);
+          if(!Array.isArray(rec)){ okAll=false; break; }
+          list=list.concat(rec);
+          if(c===0){
+            mem['products']=list.slice();
+            notifyPartial();
+          }
         }
-        has=true;
+        if(okAll&&list.length){
+          mem['products']=list;
+          notifyPartial(); // avisa que o catalogo do cache esta completo
+          _idbChunkCount=meta.chunks;
+          if(meta.sync){
+            _cacheSync={
+              rev:(meta.sync.rev===undefined?null:meta.sync.rev),
+              wm:Number(meta.sync.wm)||0,
+              ts:Number(meta.sync.ts)||Number(meta.ts)||0
+            };
+            mem['products_rev']=_cacheSync.rev;
+            mem['products_wm']=_cacheSync.wm;
+          }
+          has=true;
+        }else if(!list.length){
+          mem['products']=[];
+        }
+      }else{
+        // Formato antigo (registro unico 'catalog'): le e migra para blocos no
+        // proximo saveCache, sem forcar uma recarga completa do catalogo.
+        var legacy=await _idb.get(IDB_LEGACY_KEY);
+        if(legacy&&Array.isArray(legacy.products)&&legacy.products.length&&has){
+          mem['products']=legacy.products;
+          if(legacy.sync){
+            _cacheSync={
+              rev:(legacy.sync.rev===undefined?null:legacy.sync.rev),
+              wm:Number(legacy.sync.wm)||0,
+              ts:Number(legacy.sync.ts)||Number(legacy.ts)||0
+            };
+            mem['products_rev']=_cacheSync.rev;
+            mem['products_wm']=_cacheSync.wm;
+          }
+          has=true;
+          _idbLegacyPending=true;
+          _idbMarkDirty(-1); // migra tudo para o formato em blocos
+          notifyPartial();
+        }
       }
     }catch(e){}
     // Com o catalogo vindo do cache, marca o baseline do admin para que o
@@ -753,6 +867,7 @@ const DB = (function(){
       mem['events'] = arr.length>10000 ? arr.slice(arr.length-10000) : arr;
       Object.keys(_eventsBaseline).forEach(function(k){delete _eventsBaseline[k]});
       mem['events'].forEach(function(e){ if(e&&e.id) _eventsBaseline[e.id]=JSON.stringify(e); });
+      if(typeof invalidateViewCountsCache==='function') invalidateViewCountsCache();
     }catch(e){
       console.error('FB load events items', e);
       mem['events'] = defaultFor('events');
@@ -805,8 +920,25 @@ const DB = (function(){
   }
 
   const productsCol = function(){ return fire.db? fire.db.collection('agrovel_data').doc('products').collection('items') : null; };
+  // Colecao INDICE: guarda apenas os campos leves usados na grade/busca
+  // (nome, preco, categoria, marca, thumb, etc). O documento completo continua
+  // na colecao 'products' e so e baixado na pagina de detalhe/edicao.
+  const indexCol = function(){ return fire.db? fire.db.collection('agrovel_data').doc('products_index').collection('items') : null; };
+  // Decide de onde o catalogo e lido: do indice leve quando ele esta completo
+  // (products_meta.idxTotal == products_meta.total); senao da colecao completa.
+  function _catalogReadCol(){
+    if(mem['_idxComplete']){
+      var ic=indexCol();
+      if(ic) return ic;
+    }
+    return productsCol();
+  }
   const _productsBaseline = {};
   let _productsDirty = false;
+  // Versao do catalogo em memoria: incrementa a cada mudanca real na lista.
+  // Usada para invalidar caches derivados (filtro/ordenacao da grade).
+  let _productsVersion = 0;
+  function _bumpProductsVersion(){ _productsVersion++; }
   // Leitura paginada no Firestore: a primeira carga traz um lote pequeno
   // para o catalogo aparecer rapido; o restante carrega em segundo plano,
   // em blocos, sem travar a tela.
@@ -864,7 +996,10 @@ const DB = (function(){
       seen[p.id]=1; add.push(p);
       _productsBaseline[p.id]=JSON.stringify(p);
     });
-    if(add.length) mem['products'] = cur.concat(add);
+    if(add.length){
+      mem['products'] = cur.concat(add);
+      _markProductsChanged(cur.length, mem['products'].length);
+    }
   }
 
   async function loadProduct(id){
@@ -886,8 +1021,12 @@ const DB = (function(){
       for(var i=0;i<cur.length;i++){
         if(cur[i]&&cur[i].id===key){ index=i; break; }
       }
-      if(index>=0) mem['products'][index]=p;
-      else appendProducts([p]);
+      if(index>=0){
+        mem['products'][index]=p;
+        _markProductsChanged(index, index+1);
+      }else{
+        appendProducts([p]);
+      }
       _productsBaseline[key]=JSON.stringify(p);
       clearProductsError();
       saveCache();
@@ -914,6 +1053,11 @@ const DB = (function(){
       }
     });
     const m={total:total, active:active, cats:cats, species:species, brands:brands};
+    // Preserva a informacao de completude do indice leve: se esta sessao sabe
+    // que ele esta completo, grava idxTotal; senao mantem o valor existente
+    // (nunca remove o marcador de quem nao administra o indice).
+    if(mem['_idxComplete']) m.idxTotal=total;
+    else if(mem['products_meta']&&typeof mem['products_meta'].idxTotal==='number') m.idxTotal=mem['products_meta'].idxTotal;
     mem['products_meta']=m;
     return m;
   }
@@ -940,6 +1084,9 @@ const DB = (function(){
         mem['products_meta'] = data.v;
         try{ if(typeof notifyProductsMetaLoaded==='function') notifyProductsMetaLoaded(); }catch(e){}
       }
+      // Indice leve completo? (idxTotal == total). Decide se o catalogo e lido
+      // da colecao enxuta (products_index) ou da colecao completa (products).
+      mem['_idxComplete']=!!(data&&data.v&&typeof data.v.idxTotal==='number'&&data.v.idxTotal===data.v.total);
       // Estado da sincronizacao incremental (revisao + marco temporal + ids
       // excluidos). Doc antigo (sem patch) cai em rev=null.
       mem['products_rev'] = (data.rev===undefined?null:data.rev);
@@ -1121,6 +1268,7 @@ const DB = (function(){
     });
     if(changed&&cur.length>1) cur.sort(compareByName);
     mem['products']=cur;
+    if(changed) _markProductsChanged(-1);
     return changed;
   }
 
@@ -1157,6 +1305,7 @@ const DB = (function(){
           const data=snap.data()||{};
           if(data.v&&typeof data.v.total==='number'){
             mem['products_meta']=data.v;
+            mem['_idxComplete']=!!(typeof data.v.idxTotal==='number'&&data.v.idxTotal===data.v.total);
             try{ if(typeof notifyProductsMetaLoaded==='function') notifyProductsMetaLoaded(); }catch(e){}
           }
           mem['products_wm']=_tsMs(data.updatedAt);
@@ -1197,7 +1346,7 @@ const DB = (function(){
     if(_deltaSyncRunning) return false;
     if(_productsDirty) return false;
     if(!fire.db) return false;
-    const col=productsCol();
+    const col=_catalogReadCol();
     if(!col) return false;
     _deltaSyncRunning=true;
     try{
@@ -1326,6 +1475,7 @@ const DB = (function(){
       // Semeia a grade somente quando ainda nao ha catalogo em memoria (cache).
       if(!(Array.isArray(mem['products'])&&mem['products'].length)){
         mem['products']=list.slice();
+        _markProductsChanged(-1);
         resetProductsBaseline();
         _catalogSeedMode=_topViewedFromViews?'views':'name';
         clearProductsError();
@@ -1349,10 +1499,12 @@ const DB = (function(){
   async function _addProductView(id){
     id=String(id||'');
     if(!id) return;
-    var i, list=Array.isArray(mem['products'])?mem['products']:[];
-    for(i=0;i<list.length;i++){ if(list[i]&&list[i].id===id){ list[i].views=(Number(list[i].views)||0)+1; break; } }
+    var i, viewIdx=-1, list=Array.isArray(mem['products'])?mem['products']:[];
+    for(i=0;i<list.length;i++){ if(list[i]&&list[i].id===id){ list[i].views=(Number(list[i].views)||0)+1; viewIdx=i; break; } }
     for(i=0;i<_featuredProducts.length;i++){ if(_featuredProducts[i]&&_featuredProducts[i].id===id){ _featuredProducts[i].views=(Number(_featuredProducts[i].views)||0)+1; } }
     for(i=0;i<_topViewed.length;i++){ if(_topViewed[i]&&_topViewed[i].id===id){ _topViewed[i].views=(Number(_topViewed[i].views)||0)+1; } }
+    if(viewIdx>=0) _markProductsChanged(viewIdx, viewIdx+1);
+    if(typeof invalidateViewCountsCache==='function') invalidateViewCountsCache();
     if(!fire.db) return;
     try{
       const col=productsCol();
@@ -1374,7 +1526,7 @@ const DB = (function(){
     if(!fire.db){ mem['products']=defaultFor('products'); mem['_loading']=false; return; }
     _productsComplete=false;
     try{
-      const col = productsCol();
+      const col = _catalogReadCol();
       var byName = true;
       var startAfterDoc = null;
 
@@ -1385,6 +1537,7 @@ const DB = (function(){
       if(!hasSeed && seedInfo && seedInfo.list && seedInfo.list.length > 0){
         // Seed do lote alfabetico (caso _fetchTopViewed nao tenha semeado)
         mem['products'] = seedInfo.list.slice();
+        _markProductsChanged(-1);
         resetProductsBaseline();
         _catalogSeedMode = 'name';
         byName = seedInfo.byName;
@@ -1406,6 +1559,7 @@ const DB = (function(){
         if(_productsLoadGen!==gen) return;
         if(!first.empty){
           mem['products'] = first.docs.map(function(d){return d.data()});
+          _markProductsChanged(-1);
           resetProductsBaseline();
           _catalogSeedMode='name';
           startAfterDoc=first.docs[first.docs.length-1];
@@ -1422,7 +1576,7 @@ const DB = (function(){
       saveCache();
       try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
       _loadRemainingPages(col, gen, byName, startAfterDoc);
-      _reconcileLegacy(col, gen);
+      _reconcileLegacy(productsCol(), gen);
       return;
     }catch(e){ console.error('FB load products sub', e); }
     try{
@@ -1431,6 +1585,7 @@ const DB = (function(){
       const data = (s.exists && s.data()) ? s.data() : {};
       if(Array.isArray(data.v) && data.v.length){
         mem['products'] = data.v;
+        _markProductsChanged(-1);
         resetProductsBaseline();
         const col = productsCol();
         let i;
@@ -1464,7 +1619,7 @@ const DB = (function(){
   // Retorna { list, startAfterDoc, byName } sem escrever em mem['products'].
   async function _fetchFirstAlphaBatch(gen){
     if(!fire.db) return { list: [], startAfterDoc: null, byName: true };
-    const col = productsCol();
+    const col = _catalogReadCol();
     try{
       var _t0=_pageClock();
       var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
@@ -1513,6 +1668,7 @@ const DB = (function(){
     const hasTopViewedSeed = _topViewed && _topViewed.length > 0;
     if(!hasTopViewedSeed && alphaBatchResult.list.length > 0){
       mem['products'] = alphaBatchResult.list.slice();
+      _markProductsChanged(-1);
       resetProductsBaseline();
       _catalogSeedMode = 'name';
       clearProductsError();
@@ -1554,6 +1710,87 @@ const DB = (function(){
     }catch(e){ console.error('FB write products_meta rev', e); return Promise.resolve(); }
   }
 
+  // --- Indice leve (products_index) ---
+  // Documento enxuto por produto para a grade/busca: sem fotos extras,
+  // sem ficha tecnica. O documento completo fica na colecao 'products'.
+  function _idxWritesEnabled(){ return !!mem['_idxComplete']; }
+  function _buildIndexDoc(p){
+    var idx=Object.assign({},p||{});
+    delete idx._idx;
+    delete idx.techInfo;
+    if(Array.isArray(idx.images)) idx.images=idx.images.slice(0,1);
+    if(Array.isArray(idx.focalPoints)) idx.focalPoints=idx.focalPoints.slice(0,1);
+    if(Array.isArray(idx.thumbs)) idx.thumbs=idx.thumbs.slice(0,1);
+    idx._idx=1;
+    return idx;
+  }
+
+  // Produto vindo do indice leve (grade): baixa o documento completo e mescla,
+  // para que salvar um campo (ex.: estoque) nao apague descricao, fotos extras
+  // ou ficha tecnica. Retorna null quando nao foi possivel ler o doc completo
+  // (o produto fica pendente para o proximo salvamento, sem risco de perda).
+  async function _fullProductForWrite(id,p){
+    if(!p||!p._idx){
+      var o=Object.assign({},p||{});
+      delete o._idx;
+      o.id=id;
+      return o;
+    }
+    try{
+      const snap=await productsCol().doc(id).get();
+      if(!snap.exists) return null;
+      const base=snap.data()||{};
+      var out=Object.assign({},base,{id:id});
+      Object.keys(p).forEach(function(k){
+        if(k==='images'||k==='focalPoints'||k==='thumbs'||k==='techInfo'||k==='_idx') return;
+        out[k]=p[k];
+      });
+      return out;
+    }catch(e){ return null; }
+  }
+
+  // Backfill do indice leve: roda apenas no painel admin, quando o catalogo
+  // completo esta em memoria (docs completos) e o indice ainda nao existe.
+  // Depois disso, visitantes baixam somente os documentos leves.
+  let _backfillTried=false;
+  let _backfillScanned=false;
+  async function _maybeBackfillIndex(){
+    try{
+      if(_backfillTried) return false;
+      if(!fire.db) return false;
+      if(mem['_idxComplete']||_productsDirty) return false;
+      if(!_productsComplete) return false;
+      if(_backfillScanned) return false;
+      _backfillScanned=true;
+      var list=Array.isArray(mem['products'])?mem['products']:[];
+      if(!list.length) return false;
+      for(var i=0;i<list.length;i++){ if(list[i]&&list[i]._idx) return false; }
+      var col=indexCol();
+      if(!col) return false;
+      try{
+        var k='agrovel_idx_backfill';
+        var last=Number(localStorage.getItem(k))||0;
+        if(Date.now()-last<24*60*60*1000) return false;
+        localStorage.setItem(k,String(Date.now()));
+      }catch(e){}
+      _backfillTried=true;
+      console.info('Agrovel: criando indice leve do catalogo ('+list.length+' produtos) em segundo plano...');
+      const FV=firebase.firestore.FieldValue;
+      for(var j=0;j<list.length;j+=450){
+        const batch=fire.db.batch();
+        list.slice(j,j+450).forEach(function(p){
+          if(p&&p.id) batch.set(col.doc(p.id), Object.assign({},_buildIndexDoc(p),{updatedAt:FV.serverTimestamp()}));
+        });
+        await batch.commit();
+      }
+      mem['_idxComplete']=true;
+      if(mem['products_meta']) mem['products_meta'].idxTotal=list.length;
+      try{ await fire.db.collection('agrovel_data').doc('products_meta').set({'v.idxTotal':list.length},{merge:true}); }catch(e){}
+      console.info('Agrovel: indice leve pronto.');
+      return true;
+    }catch(e){ console.error('FB backfill index',e); return false; }
+  }
+
   async function flushProducts(){
     timers['products']=null;
     _productsDirty=false;
@@ -1570,31 +1807,65 @@ const DB = (function(){
         if(_productsBaseline[p.id]!==s) writes.push({id:p.id, data:p});
       });
       Object.keys(_productsBaseline).forEach(function(id){ if(!seen[id]) deletes.push(id); });
+      const useIndex=_idxWritesEnabled();
       let i;
       if(writes.length){
-        for(i=0;i<writes.length;i+=450){
+        // Docs leves (grade): completa a partir do documento integral antes de
+        // gravar, preservando os campos que o indice nao carrega.
+        let pending=0;
+        for(i=0;i<writes.length;i+=50){
+          const page=writes.slice(i,i+50);
+          const fulls=await Promise.all(page.map(function(w){ return _fullProductForWrite(w.id, w.data); }));
+          page.forEach(function(w,j){
+            if(fulls[j]) w.data=fulls[j];
+            else { w.skip=true; pending++; }
+          });
+        }
+        const toWrite=writes.filter(function(w){ return !w.skip; });
+        for(i=0;i<toWrite.length;i+=450){
           const batch = fire.db.batch();
-          writes.slice(i,i+450).forEach(function(w){
+          toWrite.slice(i,i+450).forEach(function(w){
             // updatedAt do servidor em cada produto gravado: e o que permite a
             // sincronizacao incremental dos outros acessos (so o que mudou).
             batch.set(col.doc(w.id), Object.assign({},w.data,{updatedAt:FV.serverTimestamp()}));
+            if(useIndex){
+              batch.set(indexCol().doc(w.id), Object.assign({},_buildIndexDoc(w.data),{updatedAt:FV.serverTimestamp()}));
+            }
           });
           await batch.commit();
         }
         // Baseline sem o updatedAt (a copia local ainda nao tem o valor do
-        // servidor); o proximo delta/merge reconcilia.
-        writes.forEach(function(w){ _productsBaseline[w.id]=JSON.stringify(w.data); });
+        // servidor); o proximo delta/merge reconcilia. Os produtos gravados
+        // agora estao completos em memoria (sem o marcador do indice).
+        toWrite.forEach(function(w){
+          _productsBaseline[w.id]=JSON.stringify(w.data);
+          if(Array.isArray(mem['products'])){
+            for(var m=0;m<mem['products'].length;m++){
+              if(mem['products'][m]&&mem['products'][m].id===w.id){ mem['products'][m]=w.data; break; }
+            }
+          }
+        });
+        if(pending){
+          // Nao perdeu nada: o que nao pode ser completado fica sujo para a
+          // proxima rodada de salvamento.
+          _productsDirty=true;
+          if(timers['products']) clearTimeout(timers['products']);
+          timers['products']=setTimeout(function(){ flushProducts(); },5000);
+        }
       }
       if(deletes.length){
         for(i=0;i<deletes.length;i+=450){
           const batch = fire.db.batch();
-          deletes.slice(i,i+450).forEach(function(id){ batch.delete(col.doc(id)); });
+          deletes.slice(i,i+450).forEach(function(id){
+            batch.delete(col.doc(id));
+            if(useIndex) batch.delete(indexCol().doc(id));
+          });
           await batch.commit();
         }
         deletes.forEach(function(id){ delete _productsBaseline[id]; });
       }
       if(writes.length||deletes.length){
-        _touchMetaRevision(writes.map(function(w){return w.id}), deletes);
+        _touchMetaRevision(writes.filter(function(w){return !w.skip}).map(function(w){return w.id}), deletes);
       }
       _productsComplete=true;
       persistProductsMeta();
@@ -1640,14 +1911,17 @@ const DB = (function(){
     _startCatalog: function(){ return startCatalog(); },
     addProductView: function(id){ return _addProductView(id); },
     _loadProduct: function(id){ return loadProduct(id); },
-    _loadCache: function(){ return loadCache(); },
+    _loadCache: function(onPartial){ return loadCache(onPartial); },
     _startMetaListener: function(){ startMetaListener(); return true; },
     _flushAll: flushAll,
+    _maybeBackfillIndex: function(){ return _maybeBackfillIndex(); },
+    productsVersion: function(){ return _productsVersion; },
     _clearEventsMemo:function(){
       if(timers['events']) clearTimeout(timers['events']);
       delete pending['events'];
       mem['events']=[];
       Object.keys(_eventsBaseline).forEach(function(k){delete _eventsBaseline[k]});
+      if(typeof invalidateViewCountsCache==='function') invalidateViewCountsCache();
       return true;
     },
 
@@ -1669,7 +1943,7 @@ const DB = (function(){
     },
     productsComplete(){ return !!_productsComplete; },
     productLoadError(id){ return !!_productLoadErrors[String(id||'')]; },
-    setProducts(v){ mem['products']=v; markProductsDirty(); return true; },
+    setProducts(v){ mem['products']=v; _markProductsChanged(-1); markProductsDirty(); return true; },
     orders(){return this.g('orders')||[]},
     setOrders(v){ mem['orders']=v; persist('orders'); return true; },
     customers(){return this.g('customers')||[]},
@@ -1758,6 +2032,7 @@ function trackEvent(type,data){
     arr.push(ev);
     if(arr.length>4000)arr=arr.slice(-4000);
     DB.s('events',arr);
+    if(type==='product_view') invalidateViewCountsCache();
   }catch(e){}
 }
 
@@ -2136,7 +2411,8 @@ function imgFrame(src,p,i,opts){
   var extra=opts.extra||'';
   if(opts.hover) extra+=' group-hover:scale-105 transition-transform duration-500';
   var fp=opts.fp?' fetchpriority="'+opts.fp+'"':'';
-  return '<img src="'+src+'" decoding="async"'+fp+' alt="'+(opts.alt||'')+'" '+(opts.lazy?'loading="lazy" ':'')+'style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
+  var srcset=opts.srcset?' srcset="'+opts.srcset+'" sizes="'+(opts.sizes||'100vw')+'"':'';
+  return '<img src="'+src+'"'+srcset+' decoding="async"'+fp+' alt="'+(opts.alt||'')+'" '+(opts.lazy?'loading="lazy" ':'')+'style="'+mainStyle+'" class="'+mainCls+' '+extra+'">';
 }
 
 function thumbImg(src,p,i,alt,lazy){
@@ -2149,10 +2425,30 @@ function thumbImg(src,p,i,alt,lazy){
 function cartImg(item){
   var p=DB.products().find(function(x){return x.id===item.productId});
   var f=focalOf(p,0);
-  var src=item.image||(p&&p.images&&p.images[0])||'';
+  // Miniatura do carrinho: usa a versao leve (thumbs[0]) quando existir.
+  var src=item.image||(p&&p.thumbs&&p.thumbs[0])||(p&&p.images&&p.images[0])||'';
   var style=f?'object-position:'+f.x+'% '+f.y+'%':'padding:3px';
   var cls=f?'object-cover w-full h-full':'object-contain w-full h-full';
   return '<img src="'+src+'" alt="" style="'+style+'" class="'+cls+'">';
+}
+
+// Imagem da grade: quando existe miniatura (thumbs[0]) servida pelo Storage,
+// o navegador baixa ~320px no celular em vez da foto de 900px; telas grandes
+// continuam recebendo a foto completa. Refs locais (idb:)/base64 sao ignorados
+// no srcset para nao quebrar a selecao do navegador.
+function productThumbURL(p){
+  var t=p&&p.thumbs&&p.thumbs[0];
+  if(!t) return '';
+  var s=String(t);
+  if(s.indexOf('http')!==0) return '';
+  return s;
+}
+function cardImgOpts(p,base){
+  var t=productThumbURL(p);
+  if(!t||t===(p.images&&p.images[0])) return base;
+  base.srcset=t+' 320w, '+p.images[0]+' 900w';
+  base.sizes='(max-width: 640px) 50vw, 300px';
+  return base;
 }
 
 function getCarouselHighlights(){
@@ -2388,6 +2684,11 @@ function featPause(p){
 var CATALOG_PAGE_SIZE=15;
 var catalogVisibleCount=CATALOG_PAGE_SIZE;
 
+// O loader da logo so entra em cena se a carga realmente demorar: abaixo disso
+// a grade fica limpa e os produtos costumam chegar sem passar por ele.
+var CATALOG_LOADER_DELAY_MS=500;
+var _catalogBootStartTs=Date.now();
+
 // Filtros do catalogo: categorias comecam limitadas a 8 + "Ver Todas as
 // Categorias"; Especie Animal e Marca ficam recolhidos por padrao e so
 // exibem opcoes relacionadas a categoria selecionada.
@@ -2521,12 +2822,32 @@ function resultCount(filtered){
   return filtered.length;
 }
 
+// Texto de busca pre-computado por produto (WeakMap): evita remontar a
+// "haystack" de 12 mil produtos a cada tecla digitada ou filtro aplicado.
+// O objeto do produto e a chave: quando um produto e substituido (delta/edicao),
+// o novo objeto recalcula sozinho; produtos removidos sao coletados pelo GC.
+var _productSearchText=new WeakMap();
+function searchTextOf(p){
+  if(!p) return '';
+  var cached=_productSearchText.get(p);
+  if(cached!==undefined) return cached;
+  var t=[p.name,p.description,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' '),(p.tagsText||'')].join(' ').toLowerCase();
+  _productSearchText.set(p,t);
+  return t;
+}
+
 // Contagem REAL de visualizacoes por produto, derivada dos eventos de
 // analytics (product_view) registrados em trackEvent(). O campo "views" nos
 // documentos do catalogo normalmente nao existe (as regras publicas do
 // Firestore bloqueiam escrita nos produtos), entao o Firestore nao consegue
 // ordenar por ele. Os eventos sao a fonte confiavel para o ranking.
+// O mapa e memoizado: reconstrui-lo (varrendo ate 10 mil eventos) a cada lote
+// de produtos carregado era um dos maiores custos da ordenacao "Mais vistos".
+var _viewCountsCache=null;
+var _viewCountsVersion=0;
+function invalidateViewCountsCache(){ _viewCountsCache=null; _viewCountsVersion++; }
 function productViewCounts(){
+  if(_viewCountsCache) return _viewCountsCache;
   var map={};
   try{
     var ev=DB.events();
@@ -2538,6 +2859,7 @@ function productViewCounts(){
       });
     }
   }catch(e){}
+  _viewCountsCache=map;
   return map;
 }
 function productViewScore(p,counts){
@@ -2547,8 +2869,17 @@ function productViewScore(p,counts){
   return fromEvents>fromField?fromEvents:fromField;
 }
 
-function getFilteredProducts(){
+// Cache do ultimo resultado filtrado/ordenado. Invalidado quando os filtros
+// mudam, quando o catalogo muda (DB.productsVersion) ou quando a contagem de
+// visualizacoes muda (invalidateViewCountsCache). Dentro de uma mesma
+// atualizacao de tela, evita recalcular copia+filtro+ordenacao de 12 mil
+// produtos mais de uma vez.
+var _filteredCache=null;
+var _filteredCacheKey='';
+function getFilteredProducts(force){
   const filters=DB.filters();
+  const key=JSON.stringify(filters)+'|v'+DB.productsVersion()+'|c'+_viewCountsVersion;
+  if(!force&&_filteredCache&&_filteredCacheKey===key) return _filteredCache;
   const products=DB.products().filter(function(p){return p.active});
   let filtered=products;
   if(filters.category) filtered=filtered.filter(function(p){return p.category===filters.category});
@@ -2557,8 +2888,7 @@ function getFilteredProducts(){
   if(filters.search){
     const term=filters.search.toLowerCase();
     filtered=filtered.filter(function(p){
-      const haystack=[p.name,p.description,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' ')].join(' ').toLowerCase();
-      return haystack.indexOf(term)>=0;
+      return searchTextOf(p).indexOf(term)>=0;
     });
   }
   // Padrao: MAIS VISUALIZADOS. Usa a contagem real dos eventos product_view
@@ -2572,22 +2902,42 @@ function getFilteredProducts(){
     filtered.sort(function(a,b){var d=productViewScore(b,counts)-productViewScore(a,counts);return d!==0?d:compareByName(a,b)});
   }
   else filtered.sort(compareByName);
+  _filteredCache=filtered;
+  _filteredCacheKey=key;
   return filtered;
 }
 
-function loadingCatalogGrid(){
-  let cards='';
-  for(let i=0;i<6;i++){
-    cards+='<div class="rounded-2xl border border-green-100 bg-white overflow-hidden shadow-sm">'+
-      '<div class="aspect-square bg-green-100/60 animate-pulse"></div>'+
-      '<div class="p-4 space-y-2">'+
-        '<div class="h-4 bg-green-100 animate-pulse rounded w-3/4"></div>'+
-        '<div class="h-3 bg-green-50 animate-pulse rounded w-1/2"></div>'+
-        '<div class="h-5 bg-green-100 animate-pulse rounded w-1/3 mt-3"></div>'+
-      '</div>'+
-    '</div>';
-  }
-  return '<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6">'+cards+'</div>';
+// Enquanto o catalogo ainda esta chegando (ou o boot nem comecou), a grade
+// mostra a logo Agrovel em carregamento. A mensagem "Nenhum produto
+// encontrado" so aparece depois que a carga termina de verdade.
+function catalogIsBooting(){
+  if(DB.loadError()) return false;
+  return DB.isLoading()||!DB.productsComplete();
+}
+
+// O aviso de carregamento vive apenas abaixo da logo animada; o contador do
+// topo fica vazio enquanto a carga nao termina (nada de texto duplicado).
+function catalogCountTextHTML(filtered){
+  if(filtered.length===0&&catalogIsBooting()) return '';
+  return catalogResultsCountHTML(filtered);
+}
+
+// True somente quando a carga passou de CATALOG_LOADER_DELAY_MS sem entregar
+// produto algum: e o gatilho para exibir a logo animada pelo menor tempo
+// possivel (cargas rapidas nunca chegam a mostrar o loader).
+function catalogLoaderDue(){
+  return catalogIsBooting()&&(Date.now()-_catalogBootStartTs)>=CATALOG_LOADER_DELAY_MS;
+}
+
+function loadingCatalogLogoHTML(){
+  return '<div id="catalog-loading-logo" class="text-center py-20 fade-in">'+
+    '<div class="catalog-loader">'+
+      '<span class="catalog-loader-ring"></span>'+
+      '<img src="img/logo.webp" alt="Agrovel" class="catalog-loader-logo" width="140" height="74">'+
+    '</div>'+
+    '<p class="text-green-700 font-medium mt-5">Carregando produtos do cat&aacute;logo...</p>'+
+    '<div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden mx-auto mt-3"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>'+
+  '</div>';
 }
 
 function catalogProgressHTML(filtered){
@@ -2640,9 +2990,9 @@ function catalogDomKey(list,n){
   }
   return ids.join('|');
 }
-function markCatalogGridSynced(){
+function markCatalogGridSynced(filtered){
   const grid=document.getElementById('catalog-grid');
-  window._catalogDomKey = grid ? catalogDomKey(getFilteredProducts(),grid.children.length) : '';
+  window._catalogDomKey = grid ? catalogDomKey(filtered||getFilteredProducts(),grid.children.length) : '';
 }
 
 // Atualiza contadoras ("X produtos encontrados" / "Mostrando N de M") sem
@@ -2725,7 +3075,7 @@ function loadMoreProducts(){
   }
   const wrap=document.getElementById('load-more-wrap');
   if(wrap) wrap.innerHTML=loadMoreWrapHTML(filtered);
-  markCatalogGridSynced();
+  markCatalogGridSynced(filtered);
   window._catalogLoadingMore=false;
 }
 
@@ -2768,12 +3118,22 @@ function notifyProductsGrew(){
   if(State.view==='catalog'){
     if(_productsGrewPending) return;
     _productsGrewPending=true;
+    // Enquanto o catalogo chega em lotes (paginacao do Firestore), limita a
+    // atualizacao da grade a ~1 por segundo: remontar filtro+ordenacao+grade a
+    // cada lote de 250/500 produtos era o maior desperdicio de CPU da carga.
+    // Ao terminar, notifyProductsFullyLoaded() atualiza imediatamente.
+    var delay=0;
+    if(!DB.productsComplete()){
+      var since=Date.now()-(window._lastCatalogUpdateTs||0);
+      if(since<900) delay=900-since;
+    }
     setTimeout(function(){
       _productsGrewPending=false;
       if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
+        window._lastCatalogUpdateTs=Date.now();
         updateCatalogResults(true);
       }
-    },0);
+    },delay);
     return;
   }
   if(State.view==='admin'){
@@ -2800,6 +3160,9 @@ function notifyProductsFullyLoaded(){
   }
   else if(State.view==='catalog'&&document.getElementById('catalog-grid-area')) updateCatalogResults(true);
   else if(State.view==='admin'){
+    // Catalogo acabou de chegar por completo: bom momento para criar o indice
+    // leve (se ainda nao existir) e para redesenhar as telas dependentes.
+    try{ DB._maybeBackfillIndex(); }catch(e){}
     if(State.adminSection==='products'){
       try{ if(!syncAdminProducts()) renderAdminSection(); }catch(e){}
     }
@@ -2888,15 +3251,14 @@ function renderCatalog(){
           (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
         '</div>':'')+
 
-        '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+(DB.isLoading()&&filtered.length===0?'<span class="text-green-700 font-medium mb-2 block">Carregando produtos do cat&aacute;logo...</span><div class="w-48 h-1.5 bg-green-100 rounded-full overflow-hidden"><div class="progress-bar-indeterminate relative h-full bg-green-500 rounded-full"></div></div>':catalogResultsCountHTML(filtered))+'</p>'+
+        '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+catalogCountTextHTML(filtered)+'</p>'+
 
-        (filtered.length===0?(DB.isLoading()&&!DB.loadError()?loadingCatalogGrid():
-        '<div class="text-center py-20">'+
+        (filtered.length===0?(catalogLoaderDue()?loadingCatalogLogoHTML():(catalogIsBooting()?'':'<div class="text-center py-20">'+
           '<div class="text-6xl mb-4">🔍</div>'+
           '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
           '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
           '<button onclick="clearFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button>'+
-        '</div>'):renderCatalogGrid(filtered))+
+        '</div>')):renderCatalogGrid(filtered))+
       '</div>'+
     '</div>'+
   '</section>'+
@@ -2981,29 +3343,34 @@ function updateCatalogResults(keepPage){
 
   var existingCount=document.getElementById('catalog-results-count');
   if(existingCount){
-    existingCount.innerHTML=catalogResultsCountHTML(filtered);
+    existingCount.innerHTML=catalogCountTextHTML(filtered);
   }
   var html=((filters.category||filters.species||filters.brand||filters.search)?'<div class="flex items-center flex-wrap gap-2 mb-5">'+
     (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
     (filters.species?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-paw text-xs"></i>'+filters.species+'<button onclick="toggleSpecies(\''+filters.species+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
     (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
   '</div>':'')+
-  (filtered.length===0?'<div class="text-center py-20">'+
+  (filtered.length===0?(catalogLoaderDue()?loadingCatalogLogoHTML():(catalogIsBooting()?'':'<div class="text-center py-20">'+
     '<div class="text-6xl mb-4">🔍</div>'+
     '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
     '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
     '<button onclick="clearFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button>'+
-  '</div>':renderCatalogGrid(filtered));
+  '</div>')):renderCatalogGrid(filtered));
 
   var area=document.getElementById('catalog-grid-area');
-  if(area) area.innerHTML=html;
-  markCatalogGridSynced();
+  if(area){
+    // Loader da logo ja na tela: nao remonta a area a cada lote que ainda nao
+    // trouxe produto visivel (remontar reiniciava a animacao e piscava).
+    var keepLoader=filtered.length===0&&catalogIsBooting()&&document.getElementById('catalog-loading-logo');
+    if(!keepLoader) area.innerHTML=html;
+  }
+  markCatalogGridSynced(filtered);
 }
 
 function renderProductCard(p){
   return'<div data-pid="'+p.id+'" class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
     '<div class="relative overflow-hidden h-52 bg-white">'+
-      imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'6%',lazy:true})+
+      imgFrame(p.images[0],p,0,cardImgOpts(p,{alt:p.name,hover:true,pad:'6%',lazy:true}))+
       (p.featured?'<div class="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-star mr-1"></i>Destaque</div>':'')+
       (p.prescription?'<div class="absolute bottom-3 right-3 bg-amber-500/90 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-prescription mr-1"></i>Receita</div>':'')+
       '<div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">'+
@@ -3030,25 +3397,6 @@ function renderProductCard(p){
   '</div>';
 }
 
-function updateSearch(val){
-  const f=DB.filters();
-  f.search=val;
-  DB.setFilters(f);
-  const clearBtn=document.getElementById('search-clear');
-  if(clearBtn) clearBtn.style.display=val?'flex':'none';
-  if(val&&val.trim().length>=2)trackSearch(val.trim());
-  clearTimeout(window._st);
-  window._st=setTimeout(function(){
-    if(State.view!=='catalog') return;
-    if(document.getElementById('catalog-grid-area')){
-      updateCatalogResults();
-    } else {
-      render();
-    }
-    syncNavHash();
-  },300);
-}
-
 function clearSearch(){
   const input=document.getElementById('search-input');
   if(input) input.value='';
@@ -3068,11 +3416,15 @@ function showSearchAutocomplete(val){
     return;
   }
   
-  const products=DB.products().filter(function(p){return p.active});
-  const matches=products.filter(function(p){
-    const haystack=[p.name,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' ')].join(' ').toLowerCase();
-    return haystack.indexOf(term)>=0;
-  }).slice(0,8);
+  // Busca usa o texto pre-computado por produto (searchTextOf) e para na 8a
+  // ocorrencia, em vez de filtrar os 12 mil produtos a cada tecla.
+  const products=DB.products();
+  const matches=[];
+  for(let i=0;i<products.length&&matches.length<8;i++){
+    const p=products[i];
+    if(!p||!p.active) continue;
+    if(searchTextOf(p).indexOf(term)>=0) matches.push(p);
+  }
   
   if(matches.length===0){
     hideSearchAutocomplete();
@@ -3083,7 +3435,7 @@ function showSearchAutocomplete(val){
     return '<button type="button" onclick="selectAutocompleteProduct(\''+p.id+'\')" '+
       'class="w-full px-4 py-3 text-left hover:bg-green-50 transition-colors flex items-center gap-3 border-t border-green-100">'+
       '<div class="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center overflow-hidden flex-shrink-0">'+
-        (p.images&&p.images[0]?'<img src="'+p.images[0]+'" alt="" class="w-full h-full object-cover">':'<i class="fas fa-box text-green-400 text-xl"></i>')+
+        (p.images&&p.images[0]?'<img src="'+((p.thumbs&&p.thumbs[0])?p.thumbs[0]:p.images[0])+'" alt="" class="w-full h-full object-cover">':'<i class="fas fa-box text-green-400 text-xl"></i>')+
       '</div>'+
       '<div class="flex-1 min-w-0">'+
         '<div class="font-medium text-gray-800 truncate">'+highlightMatch(p.name,term)+'</div>'+
@@ -3154,7 +3506,13 @@ function updateSearch(val){
   const clearBtn=document.getElementById('search-clear');
   if(clearBtn) clearBtn.style.display=val?'flex':'none';
   if(val&&val.trim().length>=2)trackSearch(val.trim());
-  showSearchAutocomplete(val);
+  // Autocomplete com debounce (150 ms): o dropdown nao recalcula a cada tecla.
+  clearTimeout(window._sact);
+  if(val&&val.trim().length>=2){
+    window._sact=setTimeout(function(){ showSearchAutocomplete(val); },150);
+  }else{
+    hideSearchAutocomplete();
+  }
   clearTimeout(window._st);
   window._st=setTimeout(function(){
     if(State.view!=='catalog') return;
@@ -3211,6 +3569,10 @@ function orderWhatsApp(pid){
 function productUrl(id){
   return location.href.split('#')[0]+'#v=product&p='+encodeURIComponent(id);
 }
+// Produtos vindos do indice leve (grade/busca) nao tem descricao/fotos extras.
+// Ao abrir o detalhe, o documento completo e baixado uma unica vez e guardado
+// em memoria; enquanto isso, mostra o carregador no lugar da pagina.
+var _detailFullFetch={};
 function renderProductDetail(id){
   const p=DB.products().find(function(x){return x.id===id});
   if(!p){
@@ -3219,6 +3581,19 @@ function renderProductDetail(id){
     }
     if(!DB.productsComplete()) return '<div class="max-w-7xl mx-auto px-4 py-24 text-center"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
     return'<div class="text-center py-20"><p>Produto não encontrado</p><button onclick="navigate(\'catalog\')" class="mt-4 bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar</button></div>';
+  }
+  if(p._idx){
+    if(!_detailFullFetch[id]||DB.productLoadError(id)){
+      _detailFullFetch[id]=true;
+      try{
+        DB._loadProduct(id).then(function(ok){
+          try{ if(ok&&State.view==='product'&&State.productId===id) render(); }catch(e){}
+        });
+      }catch(e){}
+    }
+    if(!DB.productLoadError(id)){
+      return '<div class="max-w-7xl mx-auto px-4 py-24 text-center"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando produto...</p></div></div>';
+    }
   }
   trackEvent('product_view',{productId:p.id,name:p.name,brand:p.brand||'',category:p.category});
   try{ DB.addProductView(p.id); }catch(e){}
@@ -4386,6 +4761,9 @@ function saveWhatsAppNumber(){
 function renderAdminSection(){
   const el=document.getElementById('admin-content');
   if(!el) return;
+  // Sessao admin + catalogo completo em memoria = oportunidade de criar/atualizar
+  // o indice leve (products_index) usado pelos visitantes. Guardado e silencioso.
+  try{ DB._maybeBackfillIndex(); }catch(e){}
   switch(State.adminSection){
     case 'dashboard':el.innerHTML=renderDashboard();initDashboardCharts();break;
     case 'products':el.innerHTML=renderAdminProducts();break;
@@ -4914,7 +5292,20 @@ function deleteProduct(id){
   renderAdminSection();showToast('Produto excluido','warn');
 }
 
-function startProductForm(id){State.adminSection='product-form';State.editProductId=id;renderAdminSection()}
+function startProductForm(id){
+  State.adminSection='product-form';State.editProductId=id;
+  // Produto pode estar apenas no indice leve (grade): baixa o documento
+  // completo antes de abrir o formulario de edicao.
+  var p=id?DB.products().find(function(x){return x.id===id}):null;
+  if(p&&p._idx){
+    showToast('Carregando dados completos do produto...','info');
+    try{
+      DB._loadProduct(id).then(function(){ renderAdminSection(); }).catch(function(){ renderAdminSection(); });
+    }catch(e){ renderAdminSection(); }
+    return;
+  }
+  renderAdminSection()
+}
 
 // ============================================================
 // ADMIN: CATEGORIES
@@ -6455,6 +6846,7 @@ function toggleNewsEditorMode(){
 // ============================================================
 let _pendingImages = [];
 let _existingImages = [];
+let _existingThumbs = [];
 let _focalPoints = [];
 let _focalIdx = 0;
 
@@ -6463,20 +6855,28 @@ function compressImage(file, cb){
   reader.onload=function(e){
     var img=new Image();
     img.onload=function(){
-      var MAX=900;
-      var w=img.width,h=img.height;
-      if(w>MAX||h>MAX){
-        var ratio=Math.min(MAX/w,MAX/h);
-        w=Math.round(w*ratio);h=Math.round(h*ratio);
+      function render(max,quality){
+        var w=img.width,h=img.height;
+        if(w>max||h>max){
+          var ratio=Math.min(max/w,max/h);
+          w=Math.round(w*ratio);h=Math.round(h*ratio);
+        }
+        var canvas=document.createElement('canvas');
+        canvas.width=w;canvas.height=h;
+        var ctx=canvas.getContext('2d');
+        ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,h);
+        ctx.drawImage(img,0,0,w,h);
+        // WebP quando o navegador suportar (arquivos bem menores que JPEG);
+        // se nao, cai para JPEG mantendo a mesma qualidade visual.
+        var webp=canvas.toDataURL('image/webp',quality);
+        if(webp.indexOf('data:image/webp')===0) return webp;
+        return canvas.toDataURL('image/jpeg',quality);
       }
-      var canvas=document.createElement('canvas');
-      canvas.width=w;canvas.height=h;
-      var ctx=canvas.getContext('2d');
-      ctx.fillStyle='#ffffff';ctx.fillRect(0,0,w,h);
-      ctx.drawImage(img,0,0,w,h);
-      cb(canvas.toDataURL('image/jpeg',0.72),file.name);
+      var full=render(900,0.8);
+      var thumb=render(320,0.75);
+      cb(full,file.name,thumb);
     };
-    img.onerror=function(){cb(e.target.result,file.name)};
+    img.onerror=function(){cb(e.target.result,file.name,'')};
     img.src=e.target.result;
   };
   reader.readAsDataURL(file);
@@ -6485,10 +6885,14 @@ function compressImage(file, cb){
 async function uploadProductImage(src,folder){
   if(String(src).indexOf('data:')!==0) return src;
   await ensureFirebaseStorage();
-  if(!window.firebase || !firebase.storage) return src;
+  if(!window.firebase || !firebase.storage) return _storeImageLocally(src);
   return new Promise(function(resolve){
     var done=false;
     function finish(v){ if(done)return; done=true; resolve(v); }
+    // Storage indisponivel/lento: guarda o arquivo no IndexedDB do aparelho
+    // (ref "idb:") em vez de gravar base64 gigante no Firestore. A ref
+    // funciona para quem enviou; outros dispositivos veem o placeholder.
+    function fallback(){ finish(_storeImageLocally(src)); }
     try{
       var m=String(src).match(/^data:image\/([a-zA-Z0-9.+-]+)/);
       var ext=(m&&m[1])?m[1].replace(/[^a-z0-9]/gi,'')||'jpg':'jpg';
@@ -6499,13 +6903,23 @@ async function uploadProductImage(src,folder){
         .then(function(url){ finish(url); })
         .catch(function(err){
           console.error('FB storage upload',err);
-          finish(src);
+          fallback();
         });
-      setTimeout(function(){ finish(src); }, 15000);
+      setTimeout(function(){ if(!done) fallback(); }, 15000);
     }catch(err){
       console.error('FB storage upload',err);
-      finish(src);
+      fallback();
     }
+  });
+}
+
+function _storeImageLocally(src){
+  return new Promise(function(resolve){
+    try{
+      fetch(src).then(function(r){return r.blob()}).then(function(blob){
+        storeMediaBlob(blob,blob.type,function(ref){ resolve(ref||src); });
+      }).catch(function(){ resolve(src); });
+    }catch(e){ resolve(src); }
   });
 }
 
@@ -6516,8 +6930,8 @@ function uploadProductImages(images,folder){
 function handleImageSelect(input){
   Array.from(input.files||[]).forEach(function(f){
     if(f.type.indexOf('image/')!==0) return;
-    compressImage(f,function(src,name){
-      _pendingImages.push({name:name,src:src});
+    compressImage(f,function(src,name,thumb){
+      _pendingImages.push({name:name,src:src,thumb:thumb||''});
       if(_focalPoints.length<_existingImages.length+_pendingImages.length) _focalPoints.push(null);
       renderImagePreviews();
       renderFocalEditor();
@@ -6530,8 +6944,8 @@ function handleImageDrop(e){
   e.preventDefault();
   var files=Array.from(e.dataTransfer.files||[]).filter(function(f){return f.type.indexOf('image/')===0});
   files.forEach(function(f){
-    compressImage(f,function(src,name){
-      _pendingImages.push({name:name,src:src});
+    compressImage(f,function(src,name,thumb){
+      _pendingImages.push({name:name,src:src,thumb:thumb||''});
       if(_focalPoints.length<_existingImages.length+_pendingImages.length) _focalPoints.push(null);
       renderImagePreviews();
       renderFocalEditor();
@@ -6546,7 +6960,7 @@ function renderImagePreviews(){
   c.innerHTML='';
   function delImage(gi){
     if(!_focalPoints)_focalPoints=[];
-    if(gi<_existingImages.length){_existingImages.splice(gi,1);}
+    if(gi<_existingImages.length){_existingImages.splice(gi,1);if(_existingThumbs.length>gi)_existingThumbs.splice(gi,1);}
     else{_pendingImages.splice(gi-_existingImages.length,1);}
     if(_focalPoints.length>gi)_focalPoints.splice(gi,1);
     var total=_existingImages.length+_pendingImages.length;
@@ -6556,7 +6970,9 @@ function renderImagePreviews(){
     syncFocal();
     syncImages();
   }
-  var all=_existingImages.concat(_pendingImages.map(function(x){return x.src}));
+  // Chips usam miniaturas (320px) quando disponiveis: previews leves em vez de
+  // dezenas de data URLs de 900px no editor.
+  var all=_existingImages.map(function(u,i){return _existingThumbs[i]||u}).concat(_pendingImages.map(function(x){return x.thumb||x.src}));
   all.forEach(function(url,gi){
     var chip=document.createElement('div');
     chip.className='img-chip'+(gi===_focalIdx?' selected':'');
@@ -6643,6 +7059,15 @@ function syncImages(){
   if(!h) return;
   var all=_existingImages.concat(_pendingImages.map(function(x){return x.src}));
   h.value=JSON.stringify(all);
+  // Campo espelho das miniaturas: mesma ordem das imagens completas (null
+  // quando o item nao tem versao leve).
+  var th=document.getElementById('thumbs-final');
+  if(th){
+    var thumbs=_existingThumbs.slice(0);
+    _pendingImages.forEach(function(x){thumbs.push(x.thumb||null)});
+    while(thumbs.length<all.length)thumbs.push(null);
+    th.value=JSON.stringify(thumbs.slice(0,all.length));
+  }
   if(_focalPoints.length<all.length) while(_focalPoints.length<all.length)_focalPoints.push(null);
   syncFocal();
 }
@@ -6651,6 +7076,8 @@ function initProductImages(id){
   _pendingImages=[];
   var p=id?DB.products().find(function(x){return x.id===id}):null;
   _existingImages=p?(p.images||[]):[];
+  _existingThumbs=(p&&Array.isArray(p.thumbs))?p.thumbs.slice():[];
+  while(_existingThumbs.length<_existingImages.length)_existingThumbs.push(null);
   _focalPoints=(p&&p.focalPoints&&p.focalPoints.length)?p.focalPoints.slice():[];
   _focalIdx=0;
   renderImagePreviews();
@@ -6744,6 +7171,7 @@ function renderProductForm(id){
               '<textarea id="images-url-input" rows="2" class="w-full px-4 py-3 border border-gray-200 rounded-xl focus:border-green-500 focus:ring-2 focus:ring-green-100 outline-none resize-none" placeholder="https://...">'+(p?p.images.filter(function(i){return i.indexOf('img/produtos')!==0}).join('\n'):'')+'</textarea>'+
             '</div>'+
             '<input type="hidden" id="images-final" name="images" value="'+(p?p.images.join('\\n'):'')+'">'+
+            '<input type="hidden" id="thumbs-final" name="thumbs" value="'+(p&&Array.isArray(p.thumbs)?JSON.stringify(p.thumbs).replace(/"/g,'&quot;'):'[]')+'">'+
             '<input type="hidden" id="focal-final" name="focalPoints" value="'+(p&&p.focalPoints?p.focalPoints.map(function(f){return f?f.x+','+f.y:''}).join('|'):'')+'">'+
             '<div id="images-url-fallback" class="hidden"></div>'+
             '<div id="upload-msg" class="text-xs mt-2"></div>'+
@@ -6770,11 +7198,24 @@ function renderProductForm(id){
   '</div>';
 }
 
-function saveProduct(e,id){
+function saveProduct(e,id,retried){
   try{
     e.preventDefault();
     const f=new FormData(e.target);
     const products=DB.products();
+    // Produto leve (indice): busca o documento completo antes de gravar, para
+    // nao sobrescrever descricao/fotos extras com os campos da versao de grade.
+    if(id&&!retried){
+      var cur=products.find(function(x){return x.id===id});
+      if(cur&&cur._idx){
+        showToast('Buscando dados completos do produto...','info');
+        DB._loadProduct(id).then(function(){
+          var form=e.target;
+          saveProduct({preventDefault:function(){},target:form},id,true);
+        });
+        return;
+      }
+    }
     var rawImages=f.get('images');
     var images=[];
     try{images=JSON.parse(rawImages)||[]}catch{images=[];}
@@ -6782,6 +7223,13 @@ function saveProduct(e,id){
       images=rawImages.split('\n').map(function(t){return t.trim()}).filter(Boolean);
     }
     if(!images.length){images=['https://picsum.photos/seed/'+genId()+'/600/500'];}
+    // Miniaturas (320px) alinhadas as imagens completas; null onde nao existe.
+    var rawThumbs=f.get('thumbs');
+    var thumbs=[];
+    try{thumbs=JSON.parse(rawThumbs)||[]}catch{thumbs=[];}
+    if(!Array.isArray(thumbs)) thumbs=[];
+    while(thumbs.length<images.length) thumbs.push(null);
+    thumbs=thumbs.slice(0,images.length);
     var folder=id||('p'+genId());
     var focalParts=(f.get('focalPoints')||'').split('|');
     var focalPoints=images.map(function(url,i){
@@ -6809,6 +7257,7 @@ function saveProduct(e,id){
       stock:f.get('stock')?parseInt(f.get('stock')):null,
       tags:tagsVal?tagsVal.split(',').map(function(t){return t.trim()}).filter(Boolean):[],
       images:images,
+      thumbs:thumbs,
       focalPoints:focalPoints,
       description:f.get('description'),techInfo:f.get('techInfo')||'',
       featured:featured,active:f.get('active')==='on',prescription:f.get('prescription')==='on',
@@ -6823,23 +7272,33 @@ function saveProduct(e,id){
     }
     DB.setProducts(products);
     switchAdminSection('products');
-    storeImagesAsync(folder,images);
+    storeImagesAsync(folder,images,thumbs);
   }catch(err){
     console.error('saveProduct',err);
     showToast('Erro ao salvar o produto: '+(err&&err.message||'desconhecido'),'error');
   }
 }
 
-function storeImagesAsync(folder,images){
-  if(!images||!images.some(function(i){return String(i).indexOf('data:')===0})) return;
-  uploadProductImages(images,folder).then(function(uploaded){
+function storeImagesAsync(folder,images,thumbs){
+  images=Array.isArray(images)?images:[];
+  thumbs=Array.isArray(thumbs)?thumbs:[];
+  var hasData=function(a){return a.some(function(i){return i&&String(i).indexOf('data:')===0})};
+  if(!hasData(images)&&!hasData(thumbs)) return;
+  // Versoes completas e leves sobem em paralelo; falhas caem para o armazenamento
+  // local (idb:) automaticamente via uploadProductImage.
+  Promise.all([
+    Promise.all(images.map(function(src){return uploadProductImage(src,folder)})),
+    Promise.all(thumbs.map(function(src){return src?uploadProductImage(src,folder):Promise.resolve(null)}))
+  ]).then(function(res){
     try{
+      const uploaded=res[0], uploadedThumbs=res[1];
       const cur=DB.products();
       const i=cur.findIndex(function(p){return p&&p.id===folder});
       if(i<0) return;
-      const changed=uploaded.some(function(u,j){return u!==images[j]});
+      const changed=uploaded.some(function(u,j){return u!==images[j]})||uploadedThumbs.some(function(u,j){return u!==(thumbs[j]||null)});
       if(!changed) return;
       cur[i].images=uploaded;
+      cur[i].thumbs=uploadedThumbs;
       DB.setProducts(cur);
     }catch(e){
       console.error('saveProduct bg images',e);
@@ -7399,8 +7858,6 @@ window.addEventListener('DOMContentLoaded', async function(){
   if('serviceWorker' in navigator){
     navigator.serviceWorker.register('/sw.js').catch(function(){});
   }
-  var mc=document.getElementById('main-content');
-  var useCache=await DB._loadCache();
 
   function renderInitial(){
     var parsed=parseNavHash();
@@ -7414,39 +7871,60 @@ window.addEventListener('DOMContentLoaded', async function(){
     renderCategoryNavs();
   }
 
-  if(useCache){
-    DB.setLoading(true);
-    renderInitial(); // catalogo fica navegavel imediatamente a partir do cache
+  // 1) Shell (hero + skeleton) na hora, sem esperar IndexedDB nem Firebase.
+  // Antes, o boot ficava preso no await do cache antes de pintar qualquer coisa.
+  DB.setLoading(true);
+  renderInitial();
+
+  // Carga rapida nao mostra loader: a logo animada so entra se, passado o
+  // atraso, a grade ainda estiver vazia e o catalogo ainda carregando.
+  setTimeout(function(){
     try{
-      ensureFirebaseApp();
-      DB._setFire(firestoreWithPersistence());
+      if(State.view!=='catalog'||document.getElementById('catalog-loading-logo')) return;
+      if(catalogLoaderDue()&&getFilteredProducts().length===0){
+        if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+        else render();
+      }
+    }catch(e){}
+  },CATALOG_LOADER_DELAY_MS+50);
+
+  // 2) IndexedDB em blocos: o primeiro bloco ja repinta a grade com o cache;
+  // ao terminar, a grade e atualizada com o catalogo local completo.
+  var useCache=false;
+  try{
+    useCache=await DB._loadCache(function(){
+      try{
+        if(State.view==='catalog'){
+          if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+          else render();
+        }else if(State.view==='product'||State.view==='admin'){
+          render();
+        }
+      }catch(e){}
+    });
+  }catch(e){}
+
+  // 3) Firebase e atualizacao em background (com ou sem cache).
+  try{
+    ensureFirebaseApp();
+    DB._setFire(firestoreWithPersistence());
+    if(useCache){
       // Inicia a FASE 1 (incrementa a geracao do catalogo) ANTES de marcar os
-      // dados de promocao, para a FASE 3 (mais visualizados + restante) rodar
-      // na mesma geracao.
+      // dados de promocao, para a FASE 3 (mais vistos + restante) rodar na
+      // mesma geracao.
       refreshData(false); // atualiza em background, sem travar a navegacao
       markPromoDataReady();
-    }catch(e){
-      console.error('Firebase init error', e);
-      DB._markLoadError('init');
-      DB.setLoading(false);
-      if(useCache) markPromoDataReady();
-    }
-  }else{
-    // Primeiro acesso: renderiza o shell (hero + skeleton) NA HORA e preenche
-    // em background. A tela nunca fica presa em um spinner aguardando a rede.
-    DB.setLoading(true);
-    renderInitial();
-    try{
-      ensureFirebaseApp();
-      DB._setFire(firestoreWithPersistence());
+    }else{
       showPromoPopup(); // tenta exibir popup ja com dados de cache/locais
       refreshData(true);
-    }catch(e){
-      console.error('Firebase init error', e);
-      DB._markLoadError('init');
-      DB.setLoading(false);
     }
+  }catch(e){
+    console.error('Firebase init error', e);
+    DB._markLoadError('init');
+    DB.setLoading(false);
+    if(useCache) markPromoDataReady();
   }
+
   initAuth();
   DB._loadBackground().then(function(){
     renderCategoryNavs();
