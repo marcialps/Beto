@@ -677,11 +677,13 @@ const DB = (function(){
           list=list.concat(rec);
           if(c===0){
             mem['products']=list.slice();
+            _bumpProductsVersion();
             notifyPartial();
           }
         }
         if(okAll&&list.length){
           mem['products']=list;
+          _bumpProductsVersion();
           notifyPartial(); // avisa que o catalogo do cache esta completo
           _idbChunkCount=meta.chunks;
           if(meta.sync){
@@ -703,6 +705,7 @@ const DB = (function(){
         var legacy=await _idb.get(IDB_LEGACY_KEY);
         if(legacy&&Array.isArray(legacy.products)&&legacy.products.length&&has){
           mem['products']=legacy.products;
+          _bumpProductsVersion();
           if(legacy.sync){
             _cacheSync={
               rev:(legacy.sync.rev===undefined?null:legacy.sync.rev),
