@@ -4764,6 +4764,9 @@ function renderAdminSection(){
   // Sessao admin + catalogo completo em memoria = oportunidade de criar/atualizar
   // o indice leve (products_index) usado pelos visitantes. Guardado e silencioso.
   try{ DB._maybeBackfillIndex(); }catch(e){}
+  // Fotos que ficaram presas no armazenamento local (idb:) sao reenviadas ao
+  // Storage automaticamente neste aparelho (roda uma vez por minuto).
+  try{ repairProductsMedia(); }catch(e){}
   switch(State.adminSection){
     case 'dashboard':el.innerHTML=renderDashboard();initDashboardCharts();break;
     case 'products':el.innerHTML=renderAdminProducts();break;
@@ -6882,44 +6885,79 @@ function compressImage(file, cb){
   reader.readAsDataURL(file);
 }
 
-async function uploadProductImage(src,folder){
-  if(String(src).indexOf('data:')!==0) return src;
+// Le o blob de uma referencia local "idb:" (para recuperar fotos antigas).
+function loadMediaBlobRaw(ref,cb){
+  var id=String(ref||'').indexOf('idb:')===0?ref.slice(4):null;
+  if(!id){cb(null);return}
+  openMediaDB(function(db){
+    if(!db){cb(null);return}
+    try{
+      var tx=db.transaction('media','readonly');
+      var rq=tx.objectStore('media').get(id);
+      rq.onsuccess=function(){var rec=rq.result;cb(rec&&rec.blob?rec.blob:null)};
+      rq.onerror=function(){cb(null)};
+    }catch(e){cb(null)}
+  });
+}
+function blobToDataURL(blob,cb){
+  try{
+    if(blob&&!blob.type) blob=new Blob([blob],{type:'image/jpeg'});
+    var r=new FileReader();
+    r.onload=function(){cb(r.result||'')};
+    r.onerror=function(){cb('')};
+    r.readAsDataURL(blob);
+  }catch(e){cb('')}
+}
+// Converte uma referencia local "idb:" de volta para data URL (base64),
+// para poder ser reenviada ao Storage.
+function idbRefToDataURL(ref,cb){
+  loadMediaBlobRaw(ref,function(blob){
+    if(!blob){cb('');return}
+    blobToDataURL(blob,cb);
+  });
+}
+
+// Envia uma imagem (data URL) para o Firebase Storage e retorna a URL publica.
+// IMPORTANTE: nunca troca a foto por uma referencia local "idb:". Se o Storage
+// falhar ou a rede demorar demais, devolve o proprio data URL: a imagem segue
+// funcionando em TODOS os aparelhos (como nas versoes anteriores). Se o upload
+// terminar so depois do prazo, onLate(url) avisa para atualizar o produto com
+// a URL definitiva em segundo plano.
+async function uploadProductImage(src,folder,onLate){
+  src=String(src||'');
+  if(src.indexOf('idb:')===0){
+    var resolved=await new Promise(function(resolve){ idbRefToDataURL(src,resolve) });
+    if(resolved) src=resolved;
+  }
+  if(src.indexOf('data:')!==0) return src;
   await ensureFirebaseStorage();
-  if(!window.firebase || !firebase.storage) return _storeImageLocally(src);
+  if(!window.firebase || !firebase.storage) return src;
   return new Promise(function(resolve){
     var done=false;
     function finish(v){ if(done)return; done=true; resolve(v); }
-    // Storage indisponivel/lento: guarda o arquivo no IndexedDB do aparelho
-    // (ref "idb:") em vez de gravar base64 gigante no Firestore. A ref
-    // funciona para quem enviou; outros dispositivos veem o placeholder.
-    function fallback(){ finish(_storeImageLocally(src)); }
+    function fallback(){ finish(src); }
     try{
-      var m=String(src).match(/^data:image\/([a-zA-Z0-9.+-]+)/);
+      var m=src.match(/^data:image\/([a-zA-Z0-9.+-]+)/);
       var ext=(m&&m[1])?m[1].replace(/[^a-z0-9]/gi,'')||'jpg':'jpg';
       var name=('img'+Date.now()+'-'+Math.random().toString(36).slice(2,7)+'.'+ext);
       var sr=firebase.storage().ref('img/produtos/'+folder+'/'+name);
       Promise.resolve(sr.putString(src,'data_url'))
         .then(function(){ return sr.getDownloadURL(); })
-        .then(function(url){ finish(url); })
+        .then(function(url){
+          if(!done){ finish(url); return; }
+          if(onLate){ try{ onLate(url); }catch(e){} }
+        })
         .catch(function(err){
           console.error('FB storage upload',err);
           fallback();
         });
-      setTimeout(function(){ if(!done) fallback(); }, 15000);
+      // Internet lenta: nao prende o cadastro esperando o upload; a imagem
+      // segue valida (base64) e a URL final entra assim que o envio terminar.
+      setTimeout(function(){ if(!done) fallback(); }, 30000);
     }catch(err){
       console.error('FB storage upload',err);
       fallback();
     }
-  });
-}
-
-function _storeImageLocally(src){
-  return new Promise(function(resolve){
-    try{
-      fetch(src).then(function(r){return r.blob()}).then(function(blob){
-        storeMediaBlob(blob,blob.type,function(ref){ resolve(ref||src); });
-      }).catch(function(){ resolve(src); });
-    }catch(e){ resolve(src); }
   });
 }
 
@@ -7282,13 +7320,32 @@ function saveProduct(e,id,retried){
 function storeImagesAsync(folder,images,thumbs){
   images=Array.isArray(images)?images:[];
   thumbs=Array.isArray(thumbs)?thumbs:[];
-  var hasData=function(a){return a.some(function(i){return i&&String(i).indexOf('data:')===0})};
-  if(!hasData(images)&&!hasData(thumbs)) return;
-  // Versoes completas e leves sobem em paralelo; falhas caem para o armazenamento
-  // local (idb:) automaticamente via uploadProductImage.
+  // Sobe para o Storage tudo que ainda e local: data URLs (fotos novas) e
+  // refs "idb:" (fotos de versoes anteriores que nao chegaram a subir).
+  var needsUpload=function(a){return a.some(function(i){var s=String(i||'');return s.indexOf('data:')===0||s.indexOf('idb:')===0})};
+  if(!needsUpload(images)&&!needsUpload(thumbs)) return;
+  // Upload lento que terminou depois do prazo: quando a URL definitiva chegar,
+  // substitui o base64 no produto sem sobrescrever fotos alteradas depois.
+  function onLate(key,index){
+    return function(url){
+      if(!url||String(url).indexOf('data:')===0||String(url).indexOf('idb:')===0) return;
+      try{
+        const cur=DB.products();
+        const i=cur.findIndex(function(p){return p&&p.id===folder});
+        if(i<0) return;
+        const arr=Array.isArray(cur[i][key])?cur[i][key].slice():[];
+        if(String(arr[index]||'').indexOf('data:')!==0) return;
+        arr[index]=url;
+        cur[i][key]=arr;
+        DB.setProducts(cur);
+      }catch(e){ console.error('saveProduct bg image late',e); }
+    };
+  }
+  // Versoes completas e leves sobem em paralelo; se o Storage falhar, a foto
+  // permanece em base64 (funciona em todos os aparelhos).
   Promise.all([
-    Promise.all(images.map(function(src){return uploadProductImage(src,folder)})),
-    Promise.all(thumbs.map(function(src){return src?uploadProductImage(src,folder):Promise.resolve(null)}))
+    Promise.all(images.map(function(src,j){return uploadProductImage(src,folder,onLate('images',j))})),
+    Promise.all(thumbs.map(function(src,j){return src?uploadProductImage(src,folder,onLate('thumbs',j)):Promise.resolve(null)}))
   ]).then(function(res){
     try{
       const uploaded=res[0], uploadedThumbs=res[1];
@@ -7304,6 +7361,95 @@ function storeImagesAsync(folder,images,thumbs){
       console.error('saveProduct bg images',e);
     }
   });
+}
+
+// ============================================================
+// REPARO DE FOTOS (refs locais "idb:" gravadas por engano)
+// Quando o upload ao Storage falhava/demorava, a versao anterior trocava a
+// foto por uma ref "idb:" presa ao aparelho, deixando a imagem quebrada em
+// todos os lugares. Aqui as fotos locais ainda presentes no IndexedDB sao
+// reenviadas ao Storage e os produtos sao corrigidos automaticamente. Roda
+// apenas no painel administrativo, no aparelho que enviou as fotos.
+// ============================================================
+var _mediaRepairRunning=false;
+var _mediaRepairLastAt=0;
+function repairProductsMedia(){
+  if(_mediaRepairRunning) return;
+  if(Date.now()-_mediaRepairLastAt<60000) return;
+  if(typeof indexedDB==='undefined') return;
+  if(!isAdmRole(DB.currentUser())) return;
+  var found={};
+  DB.products().forEach(function(p){
+    if(!p||!p.id) return;
+    ['images','thumbs'].forEach(function(key){
+      var arr=Array.isArray(p[key])?p[key]:[];
+      arr.forEach(function(ref){
+        if(String(ref||'').indexOf('idb:')===0) found[p.id]=1;
+      });
+    });
+  });
+  var ids=Object.keys(found);
+  if(!ids.length) return;
+  _mediaRepairRunning=true;
+  _mediaRepairLastAt=Date.now();
+  console.info('Agrovel: fotos locais encontradas em '+ids.length+' produto(s). Reenviando ao Storage...');
+  showToast('Reenviando fotos locais para a nuvem...','info');
+  var chain=Promise.resolve();
+  // Produtos do indice leve precisam do documento completo antes de regravar,
+  // senao o salvamento ignora as fotos (merge parcial).
+  ids.forEach(function(pid){
+    chain=chain.then(function(){
+      var p=DB.products().find(function(x){return x&&x.id===pid});
+      if(p&&p._idx) return DB._loadProduct(pid).catch(function(){});
+      return null;
+    });
+  });
+  chain.then(function(){
+    // Recoleta as refs locais apos baixar os documentos completos.
+    var jobs=[];
+    DB.products().forEach(function(p){
+      if(!p||!p.id||!found[p.id]||p._idx) return;
+      ['images','thumbs'].forEach(function(key){
+        var arr=Array.isArray(p[key])?p[key]:[];
+        arr.forEach(function(ref,i){
+          if(String(ref||'').indexOf('idb:')===0) jobs.push({id:p.id,key:key,index:i,ref:ref});
+        });
+      });
+    });
+    if(!jobs.length){ _mediaRepairRunning=false; return; }
+    var pending=jobs.length, fixed=0;
+    function step(){
+      pending--;
+      if(pending>0) return;
+      _mediaRepairRunning=false;
+      if(fixed) showToast(fixed+' foto(s) reenviada(s) e corrigida(s) com sucesso!');
+      console.info('Agrovel: reparo de fotos concluido ('+fixed+'/'+jobs.length+').');
+    }
+    jobs.forEach(function(job){
+      idbRefToDataURL(job.ref,function(dataUrl){
+        if(!dataUrl){ step(); return; }
+        uploadProductImage(dataUrl,job.id).then(function(url){
+          if(url&&String(url).indexOf('data:')!==0&&String(url).indexOf('idb:')!==0){
+            try{
+              const cur=DB.products();
+              const i=cur.findIndex(function(x){return x&&x.id===job.id});
+              if(i>=0&&!cur[i]._idx){
+                const arr=Array.isArray(cur[i][job.key])?cur[i][job.key].slice():[];
+                if(arr[job.index]===job.ref){
+                  arr[job.index]=url;
+                  cur[i][job.key]=arr;
+                  DB.setProducts(cur);
+                  deleteMediaBlob(job.ref);
+                  fixed++;
+                }
+              }
+            }catch(e){ console.error('repair media apply',e); }
+          }
+          step();
+        }).catch(function(){ step(); });
+      });
+    });
+  }).catch(function(e){ console.error('repair media',e); _mediaRepairRunning=false; });
 }
 
 // ============================================================
