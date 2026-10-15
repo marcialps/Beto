@@ -711,7 +711,23 @@ const DB = (function(){
   // ordem de exibicao do catalogo: assim cada lote novo so acrescenta itens
   // no FIM da lista ja visivel e nada pula/muda de lugar na tela do usuario.
   const PRODUCTS_FIRST_BATCH = 15;
-  const PRODUCTS_PAGE_SIZE = 30;
+  // Tamanho do lote da paginacao do catalogo, ajustado em tempo real (abordagem 2):
+  // em vez de confiar so no tipo de rede do aparelho, o app cronometra as
+  // consultas reais ao Firestore e adapta o lote ao que a conexao de verdade
+  // esta entregando. Conexao ruim: 25; boa: 250; muito boa: 500.
+  const PRODUCTS_PAGE_SIZE_SLOW = 25;
+  const PRODUCTS_PAGE_SIZE_MEDIUM = 250;
+  const PRODUCTS_PAGE_SIZE_FAST = 500;
+  // Limiares por consulta paginada (ms): acima de DOWN o lote reduz na hora;
+  // abaixo de UP por varias consultas seguidas o lote aumenta.
+  const PRODUCTS_PAGE_DOWN_MS = 2500;
+  const PRODUCTS_PAGE_UP_MS = 900;
+  let PRODUCTS_PAGE_SIZE = PRODUCTS_PAGE_SIZE_MEDIUM;
+  // Anti-oscilacao: quantas consultas rapidas seguidas sao necessarias para
+  // aumentar o lote. Cresce a cada reducao (cap 8) para nao ficar alternando
+  // de tamanho em conexoes intermediarias.
+  let _pageFastStreak = 0;
+  let _pageUpNeeded = 3;
   // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
   // carrossel abrir ja completo (ate 5 slides) em vez de 1/5 enquanto o
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
@@ -821,6 +837,62 @@ const DB = (function(){
     }catch(e){ console.error('FB load products_meta', e); }
   }
 
+  // --- Ajuste do lote de produtos conforme a conexao medida (abordagem 2) ---
+  // Relogio da medicao: performance.now() tem sub-milissegundo e nao sofre com
+  // ajustes do relogio do sistema; Date.now() e fallback.
+  function _pageClock(){
+    try{ return (window.performance && performance.now) ? performance.now() : Date.now(); }catch(e){ return Date.now(); }
+  }
+
+  // Aplica o novo tamanho de lote (com log de diagnostico no console).
+  function _setProductsPageSize(next, ms){
+    if(next===PRODUCTS_PAGE_SIZE) return;
+    const prev=PRODUCTS_PAGE_SIZE;
+    PRODUCTS_PAGE_SIZE=next;
+    try{ console.info('Conexao: lote de produtos '+prev+' -> '+next+' (consulta em '+Math.round(ms)+' ms)'); }catch(e){}
+  }
+
+  // Mede uma consulta pequena de abertura (seed/destaques). Serve apenas para
+  // REDUZIR o lote quando a conexao ja se mostra lenta; o aumento e decidido
+  // pelas paginas reais (_recordPageTiming), que trafegam mais dados.
+  function _recordSeedTiming(ms){
+    if(typeof ms!=='number' || !isFinite(ms) || ms<0) return;
+    if(ms>PRODUCTS_PAGE_DOWN_MS){
+      _pageFastStreak=0;
+      if(PRODUCTS_PAGE_SIZE!==PRODUCTS_PAGE_SIZE_SLOW) _pageUpNeeded=Math.min(_pageUpNeeded+1, 8);
+      _setProductsPageSize(PRODUCTS_PAGE_SIZE_SLOW, ms);
+    }
+  }
+
+  // Mede uma pagina real do restante do catalogo e adapta o lote:
+  // - consulta lenta (acima de PRODUCTS_PAGE_DOWN_MS): reduz um nivel na hora;
+  // - consultas rapidas seguidas (ate PRODUCTS_PAGE_UP_MS): sobe um nivel
+  //   (25 -> 250 -> 500), exigindo _pageUpNeeded medidas seguidas.
+  function _recordPageTiming(ms){
+    if(typeof ms!=='number' || !isFinite(ms) || ms<0) return;
+    if(ms>PRODUCTS_PAGE_DOWN_MS){
+      _pageFastStreak=0;
+      const next=PRODUCTS_PAGE_SIZE===PRODUCTS_PAGE_SIZE_FAST?PRODUCTS_PAGE_SIZE_MEDIUM:PRODUCTS_PAGE_SIZE_SLOW;
+      if(next!==PRODUCTS_PAGE_SIZE){
+        _pageUpNeeded=Math.min(_pageUpNeeded+1, 8);
+        _setProductsPageSize(next, ms);
+      }
+      return;
+    }
+    if(ms<=PRODUCTS_PAGE_UP_MS){
+      _pageFastStreak++;
+      if(_pageFastStreak>=_pageUpNeeded){
+        _pageFastStreak=0;
+        const next=PRODUCTS_PAGE_SIZE===PRODUCTS_PAGE_SIZE_SLOW?PRODUCTS_PAGE_SIZE_MEDIUM
+                  :(PRODUCTS_PAGE_SIZE===PRODUCTS_PAGE_SIZE_MEDIUM?PRODUCTS_PAGE_SIZE_FAST:0);
+        if(next) _setProductsPageSize(next, ms);
+      }
+      return;
+    }
+    // Tempo intermediario: conexao "boa" para o tamanho atual; nao mexe.
+    _pageFastStreak=0;
+  }
+
   // Lista fria do catalogo: pagina o restante em segundo plano, anexando apenas
   // o que ainda nao esta em memoria (dedupe por id). Serve tanto para o seed
   // alfabetico (startAfterDoc = ultimo do primeiro lote) quanto para o seed dos
@@ -834,7 +906,9 @@ const DB = (function(){
         const q = byName
           ? (last ? col.orderBy('name').startAfter(last).limit(limit) : col.orderBy('name').limit(limit))
           : (last ? col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit) : col.orderBy(firebase.firestore.FieldPath.documentId()).limit(limit));
+        const _t0 = _pageClock();
         const snap = await q.get();
+        _recordPageTiming(_pageClock() - _t0);
         if(_productsLoadGen!==gen) return;
         if(snap.empty) break;
         appendProducts(snap.docs.map(function(d){return d.data()}));
@@ -979,7 +1053,9 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     const tgen=++_topViewedGen;
     try{
       const col=productsCol();
+      var _t0=_pageClock();
       var snap=await col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();
+      _recordSeedTiming(_pageClock()-_t0);
       if(_topViewedGen!==tgen) return false;
       var list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
       if(list.length){
@@ -1064,7 +1140,9 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
 
       if(!hasSeed){
         // Sem seed (ranking vazio/caminho admin): primeiro lote alfabetico.
+        var _t0=_pageClock();
         var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
+        _recordSeedTiming(_pageClock()-_t0);
         if(first.empty){
           // Salvaguarda: documento sem o campo "name" nao entra na ordenacao
           // por nome. Se nenhum veio, varre o catalogo por documentId.
@@ -1131,7 +1209,9 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     if(!fire.db) return { list: [], startAfterDoc: null, byName: true };
     const col = productsCol();
     try{
+      var _t0=_pageClock();
       var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
+      _recordSeedTiming(_pageClock()-_t0);
       var byName = true;
       if(first.empty){
         first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
