@@ -477,36 +477,139 @@ const DB = (function(){
   const _eventsBaseline = {};
 
   const LOCAL_CACHE_KEY='agrovel_cat_cache';
-  const LOCAL_CACHE_VER=2;
-  // Revalidacao em background a cada visita. Dados antigos sao sempre usados
-  // como fallback instantaneo (inacessibilidade/lentidao nunca "apagam" o catalogo).
-  const CACHE_TTL=24*60*60*1000;
+  const LOCAL_CACHE_VER=3;
+  // Ressincronizacao completa periodica de seguranca (7 dias): cobre alteracoes
+  // feitas FORA do painel admin (ex.: console do Firebase), que nao passam pela
+  // revisao. Entre uma e outra, o catalogo e atualizado so por delta.
+  const FULL_RESYNC_MAX_MS=7*24*60*60*1000;
   const CRITICAL_KEYS=['categories','users','cart','promos','highlights','testimonials'];
 
+  // --- Cache do catalogo no IndexedDB ---
+  // O catalogo completo (milhares de produtos) passou a ficar no IndexedDB:
+  // o localStorage tem limite pratico de ~5MB por origem e o catalogo grande
+  // estourava esse teto silenciosamente (saveCache() desistia de salvar).
+  // O IndexedDB guarda a lista inteira junto do "marco" de sincronizacao
+  // (revisao + watermark), sem limite pequeno.
+  const _idb=(function(){
+    const NAME='agrovel_catalog', STORE='kv';
+    let _p=null;
+    function open(){
+      if(_p) return _p;
+      _p=new Promise(function(resolve,reject){
+        try{
+          if(!window.indexedDB){ reject(new Error('IndexedDB indisponivel')); return; }
+          const req=indexedDB.open(NAME,1);
+          req.onupgradeneeded=function(){ try{ req.result.createObjectStore(STORE); }catch(e){} };
+          req.onsuccess=function(){ resolve(req.result); };
+          req.onerror=function(){ reject(req.error||new Error('IndexedDB error')); };
+        }catch(e){ reject(e); }
+      });
+      return _p;
+    }
+    function get(key){
+      return open().then(function(db){
+        return new Promise(function(resolve,reject){
+          try{
+            const rq=db.transaction(STORE,'readonly').objectStore(STORE).get(key);
+            rq.onsuccess=function(){ resolve(rq.result); };
+            rq.onerror=function(){ reject(rq.error); };
+          }catch(e){ reject(e); }
+        });
+      });
+    }
+    function put(key,val){
+      return open().then(function(db){
+        return new Promise(function(resolve,reject){
+          try{
+            const tx=db.transaction(STORE,'readwrite');
+            tx.objectStore(STORE).put(val,key);
+            tx.oncomplete=function(){ resolve(); };
+            tx.onerror=function(){ reject(tx.error); };
+            tx.onabort=function(){ reject(tx.error); };
+          }catch(e){ reject(e); }
+        });
+      });
+    }
+    return {get:get,put:put};
+  })();
+
+  // Converte Timestamp do Firestore / {seconds,nanoseconds} / Date / number em ms.
+  function _tsMs(ts){
+    try{
+      if(!ts) return 0;
+      if(typeof ts==='number') return isFinite(ts)?ts:0;
+      if(typeof ts.toMillis==='function') return ts.toMillis();
+      if(typeof ts.seconds==='number') return ts.seconds*1000;
+      var d=new Date(ts).getTime();
+      return isFinite(d)?d:0;
+    }catch(e){ return 0; }
+  }
+
+  // Marco da ultima sincronizacao bem-sucedida: {rev, wm, ts}.
+  // rev = revisao do catalogo no products_meta; wm = maior updatedAt visto
+  // (relogio do servidor); ts = quando sincronizamos (para o resync periodico).
+  let _cacheSync=null;
+  let _idbSaveTimer=null;
+
+  // Parte leve (chaves pequenas + meta) no localStorage, de forma sincrona
+  // para estar sempre salva; o catalogo completo vai para o IndexedDB.
   function saveCache(){
     try{
       var data={v:LOCAL_CACHE_VER,ts:Date.now()};
       CRITICAL_KEYS.forEach(function(k){ data[k]=mem[k]; });
-      data['products']=Array.isArray(mem['products'])?mem['products']:[];
       if(mem['products_meta']&&typeof mem['products_meta'].total==='number') data['products_meta']=mem['products_meta'];
-      var s=JSON.stringify(data);
-      if(s.length>5*1024*1024) return;
-      localStorage.setItem(LOCAL_CACHE_KEY,s);
+      localStorage.setItem(LOCAL_CACHE_KEY,JSON.stringify(data));
+    }catch(e){}
+    _scheduleIdbSave();
+  }
+  function _scheduleIdbSave(){
+    if(_idbSaveTimer) return;
+    _idbSaveTimer=setTimeout(function(){ _idbSaveTimer=null; _saveIdbCatalog(); },400);
+  }
+  function _saveIdbCatalog(){
+    if(_idbSaveTimer){ clearTimeout(_idbSaveTimer); _idbSaveTimer=null; }
+    try{
+      _idb.put('catalog',{
+        products:Array.isArray(mem['products'])?mem['products']:[],
+        sync:_cacheSync||null,
+        ts:Date.now()
+      }).catch(function(){});
     }catch(e){}
   }
-  function loadCache(){
+  async function loadCache(){
+    var has=false;
     try{
       var raw=localStorage.getItem(LOCAL_CACHE_KEY);
-      if(!raw)return false;
-      var c=JSON.parse(raw);
-      if(!c||c.v!==LOCAL_CACHE_VER)return false;
-      // Nao descarta cache antigo: dados obsoletos servem de fallback instantaneo
-      // enquanto a atualizacao acontece em segundo plano via refreshData().
-      CRITICAL_KEYS.forEach(function(k){ if(c[k]!==undefined) mem[k]=c[k]; });
-      if(c.products&&c.products.length) mem['products']=c.products;
-      if(c.products_meta&&typeof c.products_meta.total==='number') mem['products_meta']=c.products_meta;
-      return true;
-    }catch(e){return false;}
+      if(raw){
+        var c=JSON.parse(raw);
+        if(c&&c.v===LOCAL_CACHE_VER){
+          CRITICAL_KEYS.forEach(function(k){ if(c[k]!==undefined) mem[k]=c[k]; });
+          if(c.products_meta&&typeof c.products_meta.total==='number') mem['products_meta']=c.products_meta;
+          has=true;
+        }
+      }
+    }catch(e){}
+    try{
+      var rec=await _idb.get('catalog');
+      if(rec&&Array.isArray(rec.products)&&rec.products.length&&has){
+        mem['products']=rec.products;
+        if(rec.sync){
+          _cacheSync={
+            rev:(rec.sync.rev===undefined?null:rec.sync.rev),
+            wm:Number(rec.sync.wm)||0,
+            ts:Number(rec.sync.ts)||Number(rec.ts)||0
+          };
+          mem['products_rev']=_cacheSync.rev;
+          mem['products_wm']=_cacheSync.wm;
+        }
+        has=true;
+      }
+    }catch(e){}
+    // Com o catalogo vindo do cache, marca o baseline do admin para que o
+    // primeiro "salvar" (flushProducts) grave apenas o que mudou; sem isso,
+    // o diff ficaria vazio e o catalogo inteiro seria reescrito.
+    if(Array.isArray(mem['products'])&&mem['products'].length) resetProductsBaseline();
+    return has;
   }
 
   function defaultFor(key){
@@ -556,7 +659,7 @@ const DB = (function(){
   //  FASE 1 - popup de promocoes + 7 produtos em destaque (consulta dedicada)
   //           + categorias/highlights. Tudo em paralelo e leve: o popup e o
   //           carrossel aparecem na hora, sem esperar o catalogo.
-  //  FASE 2 - demais dados leves (usuarios, carrinho, depoimentos, meta).
+  //  FASE 2 - demais dados leves (usuarios, carrinho, depoimentos).
   //  FASE 3 - iniciada em segundo plano ASSIM QUE A FASE 1 termina (sem esperar
   //           o usuario fechar o popup): consulta separada dos mais visualizados
   //           (lista inicial) + restante do catalogo em lotes. Quando o popup
@@ -578,7 +681,8 @@ const DB = (function(){
       promoJob,
       _fetchFeaturedProducts(gen),
       _fetchOne('categories'),
-      _fetchOne('highlights')
+      _fetchOne('highlights'),
+      loadProductsMeta()
     ]);
     if(_productsLoadGen!==gen) return;
     saveCache();
@@ -596,8 +700,7 @@ const DB = (function(){
     await Promise.all([
       _fetchOne('users'),
       _fetchOne('cart'),
-      _fetchOne('testimonials'),
-      loadProductsMeta()
+      _fetchOne('testimonials')
     ]);
     mem['_productsReady']=true;
     saveCache();
@@ -820,7 +923,10 @@ const DB = (function(){
       if(!fire.db) return;
       const ref = fire.db.collection('agrovel_data').doc('products_meta');
       const m = recomputeProductsMeta();
-      ref.set({v:m}).catch(function(err){ console.error('FB write products_meta', err); });
+      // merge:true preserva rev/updatedAt/deleted (revisao e tombstones usados
+      // pela sincronizacao incremental). Sem merge, cada cliente que terminava
+      // uma carga completa apagava esses campos.
+      ref.set({v:m},{merge:true}).catch(function(err){ console.error('FB write products_meta', err); });
     }catch(e){ console.error('FB write products_meta', e); }
   }
 
@@ -834,6 +940,11 @@ const DB = (function(){
         mem['products_meta'] = data.v;
         try{ if(typeof notifyProductsMetaLoaded==='function') notifyProductsMetaLoaded(); }catch(e){}
       }
+      // Estado da sincronizacao incremental (revisao + marco temporal + ids
+      // excluidos). Doc antigo (sem patch) cai em rev=null.
+      mem['products_rev'] = (data.rev===undefined?null:data.rev);
+      mem['products_wm'] = _tsMs(data.updatedAt);
+      mem['products_deleted'] = Array.isArray(data.deleted)?data.deleted:[];
     }catch(e){ console.error('FB load products_meta', e); }
   }
 
@@ -920,8 +1031,9 @@ const DB = (function(){
         _productsComplete=true;
         recomputeProductsMeta();
         persistProductsMeta();
+        _updateCacheSync();
         saveCache();
-        startProductsListener();
+        startMetaListener();
         try{ if(typeof notifyProductsFullyLoaded==='function') notifyProductsFullyLoaded(); }catch(e){}
       }
     }catch(e){
@@ -951,76 +1063,218 @@ const DB = (function(){
       appendProducts(extra);
       clearProductsError();
       let i;
+      const FV=firebase.firestore.FieldValue;
       for(i=0;i<extra.length;i+=450){
         const batch = fire.db.batch();
-        extra.slice(i,i+450).forEach(function(p){ batch.set(col.doc(p.id), p); });
+        extra.slice(i,i+450).forEach(function(p){ batch.set(col.doc(p.id), Object.assign({},p,{updatedAt:FV.serverTimestamp()})); });
         await batch.commit();
       }
+      _touchMetaRevision(extra.map(function(p){return p.id}), null);
       try{ await ref.delete(); }catch(e){}
       if(_productsLoadGen===gen){
         recomputeProductsMeta();
+        persistProductsMeta();
         saveCache();
         try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
       }
     }catch(e){ console.error('FB reconcile legacy', e); }
   }
 
-  // Listener em tempo real do catalogo (onSnapshot). Depois que a carga
-  // inicial termina (_productsComplete), mantem a lista local sincronizada com
-  // o Firestore: produto novo entra, editado e atualizado, removido some, sem
-  // recarregar a pagina. A lista e sempre reordenada por compareByName
-  // (mesma ordem em que o banco envia os lotes).
-  let _productsListener = null;
-  let _productsRealtimeTimer = null;
-  let _productsRealtimePending = false;
+  // ============================================================
+  // SINCRONIZACAO INCREMENTAL (revisao + delta)
+  // O listener da colecao inteira foi substituido: um onSnapshot na colecao
+  // baixava TODOS os documentos de novo a cada abertura. Agora escutamos so o
+  // documento pequeno products_meta; quando a revisao muda, baixamos apenas os
+  // produtos alterados desde o ultimo marco (updatedAt >= watermark).
+  // ============================================================
+  let _metaListener = null;
+  let _deltaSyncTimer = null;
+  let _deltaSyncRunning = false;
 
-  function startProductsListener(){
-    if(!fire.db || _productsListener) return;
-    const col = productsCol();
-    if(!col) return;
+  function _normRev(v){ return (v===undefined)?null:v; }
+
+  // Aplica em mem['products'] o delta (upsert por id, ordenando por nome) e
+  // remove ids tombados. Substitui (nao so acrescenta), pois produto editado
+  // precisa refletir o novo conteudo na hora.
+  function mergeProducts(updates, deletedIds){
+    let cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
+    let changed=false, i, p;
+    if(Array.isArray(deletedIds)&&deletedIds.length){
+      const del={};
+      deletedIds.forEach(function(id){ del[String(id)]=1; });
+      const kept=[];
+      for(i=0;i<cur.length;i++){
+        p=cur[i];
+        if(p&&p.id&&del[p.id]){ delete _productsBaseline[p.id]; changed=true; }
+        else kept.push(p);
+      }
+      if(kept.length!==cur.length) cur=kept;
+    }
+    const idx={};
+    cur.forEach(function(cp,j){ if(cp&&cp.id) idx[cp.id]=j; });
+    (updates||[]).forEach(function(nu){
+      if(!nu||!nu.id) return;
+      if(idx[nu.id]!==undefined){ cur[idx[nu.id]]=nu; }
+      else { idx[nu.id]=cur.length; cur.push(nu); }
+      _productsBaseline[nu.id]=JSON.stringify(nu);
+      changed=true;
+    });
+    if(changed&&cur.length>1) cur.sort(compareByName);
+    mem['products']=cur;
+    return changed;
+  }
+
+  function _maxProductUpdatedAt(){
+    const list=Array.isArray(mem['products'])?mem['products']:[];
+    let max=0;
+    for(let i=0;i<list.length;i++){
+      const t=_tsMs(list[i]&&list[i].updatedAt);
+      if(t>max) max=t;
+    }
+    return max;
+  }
+
+  // Atualiza o marco do cache de forma monotona (nunca retrocede).
+  // O watermark usa SOMENTE relogio do servidor (updatedAt do meta e dos
+  // produtos), para nao depender do relogio do aparelho do visitante.
+  function _updateCacheSync(){
+    const prevWm=_cacheSync?_cacheSync.wm:0;
+    _cacheSync={
+      rev:_normRev(mem['products_rev']),
+      wm:Math.max(prevWm,_tsMs(mem['products_wm']),_maxProductUpdatedAt()),
+      ts:Date.now()
+    };
+  }
+
+  // Listener leve do meta: mantem revisao/marco/tombstones em dia e dispara o
+  // delta em tempo real quando o admin altera o catalogo.
+  function startMetaListener(){
+    if(!fire.db||_metaListener) return;
     try{
-      _productsListener = col.orderBy(firebase.firestore.FieldPath.documentId()).onSnapshot(function(snap){
+      _metaListener=fire.db.collection('agrovel_data').doc('products_meta').onSnapshot(function(snap){
         try{
-          let changed=false;
-const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
-          snap.docChanges().forEach(function(change){
-            if(!change.doc || !change.doc.exists) return;
-            const p = change.doc.data() || {};
-            p.id = change.doc.id;
-            let index=-1;
-            for(let i=0;i<cur.length;i++){
-              if(cur[i] && cur[i].id===p.id){ index=i; break; }
-            }
-            if(change.type==='removed'){
-              if(index>=0){ cur.splice(index,1); changed=true; delete _productsBaseline[p.id]; }
-              return;
-            }
-            if(index>=0){
-              // Se ha escrita local pendente (ex.: admin salvando), nao
-              // sobrescreve a edicao; o flush envia e o snapshot reconcilia.
-              if(!_productsDirty && JSON.stringify(cur[index])!==JSON.stringify(p)){ cur[index]=p; changed=true; }
-            }else{
-              cur.push(p); changed=true;
-            }
-            _productsBaseline[p.id]=JSON.stringify(p);
-          });
-          if(!changed) return;
-          if(cur.length>1) cur.sort(compareByName);
-          recomputeProductsMeta();
-          saveCache();
-          if(_productsRealtimePending) return;
-          _productsRealtimePending=true;
-          if(_productsRealtimeTimer) clearTimeout(_productsRealtimeTimer);
-          _productsRealtimeTimer=setTimeout(function(){
-            _productsRealtimeTimer=null;
-            _productsRealtimePending=false;
-            try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
-          },80);
-        }catch(e){ console.error('FB products listener', e); }
+          if(!snap.exists) return;
+          const data=snap.data()||{};
+          if(data.v&&typeof data.v.total==='number'){
+            mem['products_meta']=data.v;
+            try{ if(typeof notifyProductsMetaLoaded==='function') notifyProductsMetaLoaded(); }catch(e){}
+          }
+          mem['products_wm']=_tsMs(data.updatedAt);
+          mem['products_deleted']=Array.isArray(data.deleted)?data.deleted:[];
+          const revChanged=(_normRev(data.rev)!==_normRev(mem['products_rev']));
+          mem['products_rev']=_normRev(data.rev);
+          if(revChanged&&_productsComplete&&!_productsDirty&&_catalogRunningGen===_productsLoadGen){
+            _scheduleDeltaSync();
+          }
+        }catch(e){ console.error('FB meta listener', e); }
       }, function(err){
-        console.error('FB products listener error', err);
+        console.error('FB meta listener error', err);
       });
-    }catch(e){ console.error('FB products listener setup', e); }
+    }catch(e){ console.error('FB meta listener setup', e); }
+  }
+
+  function _scheduleDeltaSync(){
+    if(_deltaSyncTimer) clearTimeout(_deltaSyncTimer);
+    _deltaSyncTimer=setTimeout(function(){
+      _deltaSyncTimer=null;
+      if(!_productsComplete||_productsDirty) return;
+      const gen=_productsLoadGen;
+      _syncDeltaFromMeta(gen).then(function(ok){
+        if(!ok||_productsLoadGen!==gen) return;
+        recomputeProductsMeta();
+        saveCache();
+        try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+      }).catch(function(){});
+    },250);
+  }
+
+  // Baixa apenas os produtos com updatedAt >= watermark. Repete a rodada se a
+  // revisao mudar durante o processo (admin editando enquanto sincroniza),
+  // garantindo que ao final o cache corresponde exatamente a revisao adotada.
+  // Retorna true quando o cache local esta alinhado; false quando nao foi
+  // possivel (rede/permissao) - o chamador entao faz a carga completa.
+  async function _syncDeltaFromMeta(gen){
+    if(_deltaSyncRunning) return false;
+    if(_productsDirty) return false;
+    if(!fire.db) return false;
+    const col=productsCol();
+    if(!col) return false;
+    _deltaSyncRunning=true;
+    try{
+      for(let round=0;round<4;round++){
+        if(_productsLoadGen!==gen) return true;
+        const revBefore=_normRev(mem['products_rev']);
+        const wm=_tsMs(_cacheSync&&_cacheSync.wm);
+        const deleted=Array.isArray(mem['products_deleted'])?mem['products_deleted'].slice():[];
+        let last=null;
+        while(true){
+          let q=col.where('updatedAt','>=',new Date(wm)).orderBy('updatedAt').limit(PRODUCTS_PAGE_SIZE);
+          if(last) q=q.startAfter(last);
+          const snap=await q.get();
+          if(_productsLoadGen!==gen) return true;
+          if(snap.empty) break;
+          mergeProducts(snap.docs.map(function(d){ return d.data(); }), null);
+          last=snap.docs[snap.docs.length-1];
+          if(snap.size<PRODUCTS_PAGE_SIZE) break;
+        }
+        if(deleted.length) mergeProducts(null, deleted);
+        if(_normRev(mem['products_rev'])===revBefore){
+          _updateCacheSync();
+          return true;
+        }
+      }
+      return false;
+    }catch(e){
+      console.error('FB delta sync', e);
+      return false;
+    }finally{
+      _deltaSyncRunning=false;
+    }
+  }
+
+  // Caminho rapido do catalogo: com cache local completo e revisao identica,
+  // NAO baixa nenhum produto (so o doc meta, 1 leitura). Se a revisao mudou,
+  // aplica o delta antes de liberar a tela.
+  async function _tryCachedCatalog(gen){
+    try{
+      if(!fire.db) return false;
+      const meta=mem['products_meta'];
+      if(!Array.isArray(mem['products'])||!mem['products'].length||!meta||typeof meta.total!=='number') return false;
+      if(!_cacheSync) return false;
+      if(_productsDirty) return false;
+      if(!_cacheSync.ts||(Date.now()-_cacheSync.ts)>FULL_RESYNC_MAX_MS) return false;
+      // Revisao mudou (produto novo/editado/excluido pelo admin): aplica o
+      // delta ANTES da conferencia de contagem - e o delta que traz os novos
+      // e remove os tombstones.
+      if(_normRev(_cacheSync.rev)!==_normRev(mem['products_rev'])){
+        const ok=await _syncDeltaFromMeta(gen);
+        if(_productsLoadGen!==gen) return true;
+        if(!ok) return false;
+      }
+      // Conferencia de contagem: se o total do banco nao bate com o cache
+      // local (mudanca perdida/fora do admin), faz a carga completa.
+      const list=Array.isArray(mem['products'])?mem['products']:[];
+      if(!list.length||list.length!==meta.total) return false;
+      _productsComplete=true;
+      mem['_loading']=false;
+      mem['_loadError']=false;
+      // O catalogo em memoria ja esta em sincronia com o servidor (revisao e
+      // contagem conferidas): renova o baseline do admin, tambem para o caso
+      // do delta acima ter trocado produtos.
+      resetProductsBaseline();
+      recomputeProductsMeta();
+      // Recalcula o marco a partir do estado atual (revisao + watermark),
+      // renovando tambem a janela do resync completo periodico.
+      _updateCacheSync();
+      saveCache();
+      startMetaListener();
+      try{ if(typeof notifyProductsFullyLoaded==='function') notifyProductsFullyLoaded(); }catch(e){}
+      try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
+      return true;
+    }catch(e){
+      console.error('FB cache+revisao', e);
+      return false;
+    }
   }
 
   // Somente os produtos marcados como destaque (limite da vitrine). Consulta
@@ -1189,6 +1443,9 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
         _productsComplete=true;
         recomputeProductsMeta();
         persistProductsMeta();
+        _updateCacheSync();
+        saveCache();
+        startMetaListener();
         clearProductsError();
         mem['_loading']=false;
         return;
@@ -1237,6 +1494,13 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     _catalogRunningGen=gen;
     _productsComplete=false;
 
+    // Caminho rapido primeiro: cache local + revisao. Se nada mudou no banco,
+    // o catalogo inteiro vem do cache (zero download de produtos). Se mudou,
+    // baixa apenas o delta. So cai na carga completa (lotes) quando nao ha
+    // cache valido ou a sincronizacao incremental nao e possivel.
+    if(await _tryCachedCatalog(gen)) return;
+    if(_productsLoadGen!==gen) return;
+
     const [topViewedResult, alphaBatchResult] = await Promise.all([
       _fetchTopViewed(gen),
       _fetchFirstAlphaBatch(gen)
@@ -1270,12 +1534,33 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     await _loadCatalog(gen);
   }
 
+  // Avisa o banco que o catalogo mudou: incrementa a revisao e marca o
+  // horario (relogio do servidor). Os clientes usam isso para baixar so o
+  // delta. writtenIds/deletedIds alimentam a lista de tombstones (produto
+  // excluido sai dos caches; produto recriado sai da lista).
+  function _touchMetaRevision(writtenIds, deletedIds){
+    try{
+      if(!fire.db) return Promise.resolve();
+      const ref=fire.db.collection('agrovel_data').doc('products_meta');
+      const FV=firebase.firestore.FieldValue;
+      const jobs=[];
+      const upd={rev:FV.increment(1),updatedAt:FV.serverTimestamp()};
+      if(Array.isArray(deletedIds)&&deletedIds.length) upd['deleted']=FV.arrayUnion.apply(FV,deletedIds);
+      jobs.push(ref.set(upd,{merge:true}));
+      if(Array.isArray(writtenIds)&&writtenIds.length){
+        jobs.push(ref.set({deleted:FV.arrayRemove.apply(FV,writtenIds)},{merge:true}));
+      }
+      return Promise.all(jobs).catch(function(err){ console.error('FB write products_meta rev', err); });
+    }catch(e){ console.error('FB write products_meta rev', e); return Promise.resolve(); }
+  }
+
   async function flushProducts(){
     timers['products']=null;
     _productsDirty=false;
     if(!fire.db) return;
     try{
       const col = productsCol();
+      const FV=firebase.firestore.FieldValue;
       const val = Array.isArray(mem['products']) ? mem['products'] : [];
       const writes = [], deletes = [], seen = {};
       val.forEach(function(p){
@@ -1289,9 +1574,15 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
       if(writes.length){
         for(i=0;i<writes.length;i+=450){
           const batch = fire.db.batch();
-          writes.slice(i,i+450).forEach(function(w){ batch.set(col.doc(w.id), w.data); });
+          writes.slice(i,i+450).forEach(function(w){
+            // updatedAt do servidor em cada produto gravado: e o que permite a
+            // sincronizacao incremental dos outros acessos (so o que mudou).
+            batch.set(col.doc(w.id), Object.assign({},w.data,{updatedAt:FV.serverTimestamp()}));
+          });
           await batch.commit();
         }
+        // Baseline sem o updatedAt (a copia local ainda nao tem o valor do
+        // servidor); o proximo delta/merge reconcilia.
         writes.forEach(function(w){ _productsBaseline[w.id]=JSON.stringify(w.data); });
       }
       if(deletes.length){
@@ -1302,9 +1593,13 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
         }
         deletes.forEach(function(id){ delete _productsBaseline[id]; });
       }
+      if(writes.length||deletes.length){
+        _touchMetaRevision(writes.map(function(w){return w.id}), deletes);
+      }
       _productsComplete=true;
       persistProductsMeta();
-      startProductsListener();
+      saveCache();
+      startMetaListener();
     }catch(err){
       console.error('FB write products', err);
       _productsDirty = true;
@@ -1331,6 +1626,9 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     if(_productsDirty) flushProducts();
   }
   try{ window.addEventListener('beforeunload', flushAll); }catch(e){}
+  // Garante o catalogo no IndexedDB mesmo se o usuario fechar a aba antes do
+  // debounce do saveCache disparar.
+  try{ window.addEventListener('pagehide', function(){ _saveIdbCatalog(); }); }catch(e){}
 
   return {
     fire: fire,
@@ -1340,10 +1638,10 @@ const cur = Array.isArray(mem['products'])?mem['products']:(mem['products']=[]);
     _loadCritical: function(onPromoReady,onStageReady){ return loadCritical(onPromoReady,onStageReady); },
     _loadBackground: function(){ return loadBackground(); },
     _startCatalog: function(){ return startCatalog(); },
-    _startProductsListener: function(){ startProductsListener(); return true; },
     addProductView: function(id){ return _addProductView(id); },
     _loadProduct: function(id){ return loadProduct(id); },
     _loadCache: function(){ return loadCache(); },
+    _startMetaListener: function(){ startMetaListener(); return true; },
     _flushAll: flushAll,
     _clearEventsMemo:function(){
       if(timers['events']) clearTimeout(timers['events']);
@@ -6977,6 +7275,29 @@ function ensureFirebaseApp(){
   firebase.initializeApp(firebaseConfig);
   _fbInitDone=true;
 }
+// Persistencia offline do Firestore (IndexedDB do proprio SDK): complemento do
+// cache proprio do site. Com ela o SDK guarda os documentos localmente e os
+// acessos seguintes leem do disco, baixando do servidor apenas o que mudou.
+// Best-effort: em navegador sem IndexedDB ou com outra aba ja usando a
+// persistencia (multi-abas), o SDK rejeita e o site segue normal (sem cache).
+let _fsInstance=null, _fsPersistenceTried=false;
+function firestoreWithPersistence(){
+  if(_fsInstance) return _fsInstance;
+  _fsInstance=firebase.firestore();
+  if(!_fsPersistenceTried){
+    _fsPersistenceTried=true;
+    try{
+      _fsInstance.enablePersistence().then(function(){
+        try{ console.info('Firestore: persistencia offline ativa (IndexedDB)'); }catch(e){}
+      }).catch(function(err){
+        try{ console.warn('Firestore: persistencia offline indisponivel ('+((err&&err.code)||err)+')'); }catch(e){}
+      });
+    }catch(e){
+      try{ console.warn('Firestore: persistencia offline indisponivel', e); }catch(e2){}
+    }
+  }
+  return _fsInstance;
+}
 // Auth e Storage sao carregados sob demanda (so sao usados em login/admin),
 // reduzindo ~170KB de JS no carregamento inicial do catalogo.
 var _fbModuleCache={};
@@ -7049,7 +7370,7 @@ async function retryCatalogLoad(){
   if(btn){btn.disabled=true;btn.innerHTML='<i class="fas fa-spinner fa-spin"></i> Carregando...';}
   try{
     ensureFirebaseApp();
-    const db=firebase.firestore();
+    const db=firestoreWithPersistence();
     DB._setFire(db);
     DB.setLoading(true);
     DB._clearLoadError();
@@ -7079,7 +7400,7 @@ window.addEventListener('DOMContentLoaded', async function(){
     navigator.serviceWorker.register('/sw.js').catch(function(){});
   }
   var mc=document.getElementById('main-content');
-  var useCache=DB._loadCache();
+  var useCache=await DB._loadCache();
 
   function renderInitial(){
     var parsed=parseNavHash();
@@ -7098,7 +7419,7 @@ window.addEventListener('DOMContentLoaded', async function(){
     renderInitial(); // catalogo fica navegavel imediatamente a partir do cache
     try{
       ensureFirebaseApp();
-      DB._setFire(firebase.firestore());
+      DB._setFire(firestoreWithPersistence());
       // Inicia a FASE 1 (incrementa a geracao do catalogo) ANTES de marcar os
       // dados de promocao, para a FASE 3 (mais visualizados + restante) rodar
       // na mesma geracao.
@@ -7117,7 +7438,7 @@ window.addEventListener('DOMContentLoaded', async function(){
     renderInitial();
     try{
       ensureFirebaseApp();
-      DB._setFire(firebase.firestore());
+      DB._setFire(firestoreWithPersistence());
       showPromoPopup(); // tenta exibir popup ja com dados de cache/locais
       refreshData(true);
     }catch(e){
