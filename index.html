@@ -629,7 +629,7 @@ const DB = (function(){
         await _idb.put('catalog_c'+c, list.slice(c*IDB_CHUNK_SIZE,(c+1)*IDB_CHUNK_SIZE));
       }
       // Meta por ultimo: so aponta para blocos ja gravados.
-      await _idb.put(IDB_META_KEY,{sync:_cacheSync||null,ts:Date.now(),count:list.length,chunks:chunks});
+      await _idb.put(IDB_META_KEY,{sync:_cacheSync||null,ts:Date.now(),count:list.length,chunks:chunks,cursor:_catalogCursor||null});
       for(var d=chunks;d<_idbChunkCount;d++){ try{ await _idb.del('catalog_c'+d); }catch(e){} }
       _idbChunkCount=chunks;
       if(_idbLegacyPending){
@@ -686,6 +686,8 @@ const DB = (function(){
           _bumpProductsVersion();
           notifyPartial(); // avisa que o catalogo do cache esta completo
           _idbChunkCount=meta.chunks;
+          // Retoma a varredura da proxima visita a partir do ultimo produto salvo.
+          if(meta.cursor&&meta.cursor.id) _catalogCursor=meta.cursor;
           if(meta.sync){
             _cacheSync={
               rev:(meta.sync.rev===undefined?null:meta.sync.rev),
@@ -759,7 +761,7 @@ const DB = (function(){
     try{
       const ref = docRef(key);
       if(!ref){ mem[key]=defaultFor(key); return; }
-      const snap = await ref.get();
+      const snap = await _withRetry(function(){return ref.get();}, 'dados ('+key+')');
       const data = (snap.exists && snap.data()) ? snap.data() : {};
       if(data.v!==undefined){
         mem[key] = data.v;
@@ -987,6 +989,10 @@ const DB = (function(){
   let _productsComplete = false;
   let _featuredProducts = [];
   const _productLoadErrors = {};
+  // Progresso da varredura sequencial do catalogo: ultimo documento ja baixado
+  // ({byName,name,id,rev}), persistido no meta do IndexedDB para retomar o
+  // download de onde parou na proxima visita (somente com a revisao inalterada).
+  let _catalogCursor = null;
 
   function appendProducts(arr){
     const cur = Array.isArray(mem['products'])?mem['products']:[];
@@ -1081,7 +1087,7 @@ const DB = (function(){
     try{
       if(!fire.db) return;
       const ref = fire.db.collection('agrovel_data').doc('products_meta');
-      const snap = await ref.get();
+      const snap = await _withRetry(function(){return ref.get();}, 'products_meta');
       const data = (snap.exists && snap.data()) ? snap.data() : {};
       if(data && data.v && typeof data.v.total==='number'){
         mem['products_meta'] = data.v;
@@ -1154,31 +1160,102 @@ const DB = (function(){
     _pageFastStreak=0;
   }
 
+  // Valida o progresso persistido para retomar a varredura sequencial: so vale
+  // com a MESMA revisao (nada mudou antes do cursor), mesma ordenacao e cache
+  // local ainda incompleto. Caso contrario, varre do inicio (seguro).
+  function _validCatalogCursor(byName){
+    var c=_catalogCursor;
+    if(!c||!c.id) return null;
+    if(!!c.byName!==!!byName) return null;
+    var rev=_normRev(mem['products_rev']);
+    if(rev===null||_normRev(c.rev)!==rev) return null;
+    if(byName&&c.name===undefined) return null;
+    var meta=mem['products_meta'];
+    var total=(meta&&typeof meta.total==='number')?meta.total:0;
+    var have=Array.isArray(mem['products'])?mem['products'].length:0;
+    if(total>0&&have>=total) return null;
+    return c;
+  }
+
+  // Tempo maximo e tentativas das consultas ao Firestore: um transporte
+  // travado (ex.: ping do canal bloqueado por adblocker) nao pode congelar a
+  // carga para sempre; ao esgotar, o erro sobe e o usuario retoma de onde parou.
+  var _queryTimeoutMs=60000;
+  var _queryTries=2;
+  function _withRetry(fn, label){
+    function attempt(n){
+      return new Promise(function(resolve,reject){
+        var finished=false;
+        var timer=setTimeout(function(){
+          if(finished) return; finished=true;
+          reject(new Error('tempo esgotado'));
+        },_queryTimeoutMs);
+        fn().then(function(v){
+          if(finished) return; finished=true; clearTimeout(timer); resolve(v);
+        },function(err){
+          if(finished) return; finished=true; clearTimeout(timer); reject(err);
+        });
+      }).catch(function(err){
+        if(n<=1) throw err;
+        try{ console.warn('Agrovel: '+(label||'consulta')+' falhou, tentando novamente... ('+((err&&err.message)||err)+')'); }catch(e){}
+        return new Promise(function(res){setTimeout(res,1500);}).then(function(){return attempt(n-1);});
+      });
+    }
+    return attempt(_queryTries);
+  }
+
   // Lista fria do catalogo: pagina o restante em segundo plano, anexando apenas
   // o que ainda nao esta em memoria (dedupe por id). Serve tanto para o seed
   // alfabetico (startAfterDoc = ultimo do primeiro lote) quanto para o seed dos
-  // mais visualizados (startAfterDoc = null, varre do inicio).
-  async function _loadRemainingPages(col, gen, byName, startAfterDoc){
+  // mais visualizados (startAfterDoc = null, varre do inicio). resumeCursor
+  // continua exatamente do ultimo produto persistido (mesma ordem name+id).
+  async function _loadRemainingPages(col, gen, byName, startAfterDoc, resumeCursor){
     try{
       var last = startAfterDoc || null;
+      var resume = (!last && resumeCursor) ? resumeCursor : null;
       while(true){
         if(_productsLoadGen!==gen) return;
         const limit = PRODUCTS_PAGE_SIZE;
-        const q = byName
-          ? (last ? col.orderBy('name').startAfter(last).limit(limit) : col.orderBy('name').limit(limit))
-          : (last ? col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit) : col.orderBy(firebase.firestore.FieldPath.documentId()).limit(limit));
+        var q;
+        if(resume){
+          // O cursor do documentId precisa ser a STRING do id (o SDK recusa
+          // DocumentReference em startAfter: "Expected a string for document ID").
+          q = byName
+            ? col.orderBy('name').orderBy(firebase.firestore.FieldPath.documentId()).startAfter(resume.name, String(resume.id)).limit(limit)
+            : col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(String(resume.id)).limit(limit);
+        }else{
+          q = byName
+            ? (last ? col.orderBy('name').startAfter(last).limit(limit) : col.orderBy('name').limit(limit))
+            : (last ? col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit) : col.orderBy(firebase.firestore.FieldPath.documentId()).limit(limit));
+        }
+        var snap;
         const _t0 = _pageClock();
-        const snap = await q.get();
+        try{
+          snap = await _withRetry(function(){return q.get();}, 'catalogo');
+        }catch(err){
+          if(resume){
+            // Retomada indisponivel (ex.: consulta recusada): refaz do inicio.
+            console.warn('Catalogo: retomada indisponivel, varrendo do inicio ('+((err&&err.message)||err)+')');
+            resume=null; last=null;
+            continue;
+          }
+          throw err;
+        }
         _recordPageTiming(_pageClock() - _t0);
         if(_productsLoadGen!==gen) return;
         if(snap.empty) break;
         appendProducts(snap.docs.map(function(d){return d.data()}));
         last = snap.docs[snap.docs.length-1];
+        var lastData=(last.data&&last.data())||{};
+        _catalogCursor={byName:!!byName,name:lastData.name,id:String(last.id),rev:_normRev(mem['products_rev'])};
+        resume=null;
+        _scheduleIdbSave(); // persiste o progresso (blocos + cursor) sem bloquear
         try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
         if(snap.size<limit) break;
       }
       if(_productsLoadGen===gen){
         _productsComplete=true;
+        _catalogCursor=null;
         recomputeProductsMeta();
         persistProductsMeta();
         _updateCacheSync();
@@ -1362,7 +1439,7 @@ const DB = (function(){
         while(true){
           let q=col.where('updatedAt','>=',new Date(wm)).orderBy('updatedAt').limit(PRODUCTS_PAGE_SIZE);
           if(last) q=q.startAfter(last);
-          const snap=await q.get();
+          const snap=await _withRetry(function(){return q.get();}, 'delta');
           if(_productsLoadGen!==gen) return true;
           if(snap.empty) break;
           mergeProducts(snap.docs.map(function(d){ return d.data(); }), null);
@@ -1418,6 +1495,7 @@ const DB = (function(){
       // Recalcula o marco a partir do estado atual (revisao + watermark),
       // renovando tambem a janela do resync completo periodico.
       _updateCacheSync();
+      _catalogCursor=null;
       saveCache();
       startMetaListener();
       try{ if(typeof notifyProductsFullyLoaded==='function') notifyProductsFullyLoaded(); }catch(e){}
@@ -1438,7 +1516,7 @@ const DB = (function(){
     if(!fire.db) return;
     try{
       const col = productsCol();
-      const snap = await col.where('featured','==',true).limit(PRODUCTS_FEATURED_BATCH).get();
+      const snap = await _withRetry(function(){return col.where('featured','==',true).limit(PRODUCTS_FEATURED_BATCH).get();}, 'destaques');
       if(_productsLoadGen!==gen) return;
       const list = snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id});
       list.sort(compareByName);
@@ -1460,7 +1538,7 @@ const DB = (function(){
     try{
       const col=productsCol();
       var _t0=_pageClock();
-      var snap=await col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();
+      var snap=await _withRetry(function(){return col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos');
       _recordSeedTiming(_pageClock()-_t0);
       if(_topViewedGen!==tgen) return false;
       var list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
@@ -1468,7 +1546,7 @@ const DB = (function(){
         _topViewedFromViews=true;
       }else{
         _topViewedFromViews=false;
-        snap=await col.orderBy('name').limit(PRODUCTS_TOP_VIEWED).get();
+        snap=await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos (nome)');
         if(_topViewedGen!==tgen) return false;
         list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
       }
@@ -1551,12 +1629,12 @@ const DB = (function(){
       if(!hasSeed){
         // Sem seed (ranking vazio/caminho admin): primeiro lote alfabetico.
         var _t0=_pageClock();
-        var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
-        _recordSeedTiming(_pageClock()-_t0);
+        var first = await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();}, 'primeiros produtos');
+        _recordSeedTiming(_pageClock() - _t0);
         if(first.empty){
           // Salvaguarda: documento sem o campo "name" nao entra na ordenacao
           // por nome. Se nenhum veio, varre o catalogo por documentId.
-          first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
+          first = await _withRetry(function(){return col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();}, 'primeiros produtos');
           byName = false;
         }
         if(_productsLoadGen!==gen) return;
@@ -1570,7 +1648,7 @@ const DB = (function(){
       }else if(!seedInfo || !seedInfo.byName){
         // Ja ha seed (mais visualizados ou lote alfabetico ja aplicado):
         // descobre a ordenacao suportada se nao veio do seedInfo.
-        var probe = await col.orderBy('name').limit(1).get();
+        var probe = await _withRetry(function(){return col.orderBy('name').limit(1).get();}, 'sondagem');
         if(_productsLoadGen!==gen) return;
         byName = !probe.empty;
       }
@@ -1578,7 +1656,9 @@ const DB = (function(){
       mem['_loading']=false;
       saveCache();
       try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
-      _loadRemainingPages(col, gen, byName, startAfterDoc);
+      var resumeCursor=startAfterDoc?null:_validCatalogCursor(byName);
+      if(resumeCursor){ try{ console.info('Catalogo: retomando download de onde parou (cache parcial).'); }catch(e){} }
+      _loadRemainingPages(col, gen, byName, startAfterDoc, resumeCursor);
       _reconcileLegacy(productsCol(), gen);
       return;
     }catch(e){ console.error('FB load products sub', e); }
@@ -1625,11 +1705,11 @@ const DB = (function(){
     const col = _catalogReadCol();
     try{
       var _t0=_pageClock();
-      var first = await col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();
+      var first = await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();}, 'primeiros produtos');
       _recordSeedTiming(_pageClock()-_t0);
       var byName = true;
       if(first.empty){
-        first = await col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();
+        first = await _withRetry(function(){return col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();}, 'primeiros produtos');
         byName = false;
       }
       if(_productsLoadGen!==gen) return { list: [], startAfterDoc: null, byName: true };
@@ -3161,7 +3241,12 @@ function notifyProductsFullyLoaded(){
   if(State.view==='product'){
     if(!DB.products().some(function(p){return p.id===State.productId})) render();
   }
-  else if(State.view==='catalog'&&document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+  else if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
+    // Falhou no meio da carga (ex.: conexao caiu): remonta a tela inteira
+    // para exibir o aviso com o botao "Continuar carregando" (retoma do ponto).
+    if(DB.loadError()&&!DB.productsComplete()) render();
+    else updateCatalogResults(true);
+  }
   else if(State.view==='admin'){
     // Catalogo acabou de chegar por completo: bom momento para criar o indice
     // leve (se ainda nao existir) e para redesenhar as telas dependentes.
@@ -3211,10 +3296,10 @@ function renderCatalog(){
   const featured=getCarouselHighlights();
 
   return'<div>'+
-  (DB.loadError()&&!products.length?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
+  (DB.loadError()&&(!products.length||!DB.productsComplete())?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
     '<div class="flex flex-col sm:flex-row sm:items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">'+
-      '<div class="flex-1"><strong><i class="fas fa-exclamation-triangle mr-1"></i> Ca&aacute;logo temporariamente indispon&iacute;vel.</strong> N&atilde;o foi poss&iacute;vel carregar os produtos cadastrados. Verifique sua conex&atilde;o e tente novamente.</div>'+
-      '<button id="catalog-retry-btn" onclick="retryCatalogLoad()" class="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded-xl transition-colors">Tentar novamente</button>'+
+      '<div class="flex-1"><strong><i class="fas fa-exclamation-triangle mr-1"></i> '+(products.length?'Conex&atilde;o interrompida durante o carregamento do cat&aacute;logo.':'Ca&aacute;logo temporariamente indispon&iacute;vel.')+'</strong> '+(products.length?'Voc&ecirc; pode continuar de onde parou.':'N&atilde;o foi poss&iacute;vel carregar os produtos cadastrados.')+' Verifique sua conex&atilde;o e tente novamente.</div>'+
+      '<button id="catalog-retry-btn" onclick="retryCatalogLoad()" class="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded-xl transition-colors">'+(products.length?'Continuar carregando':'Tentar novamente')+'</button>'+
     '</div>'+
   '</div>':'')+
   '<div id="catalog-carousel-wrap" style="display:'+(filters.category||filters.search||filters.species||filters.brand?'none':'block')+'">'+renderFeaturedCarousel(featured)+'</div>'+
@@ -7894,6 +7979,13 @@ function firestoreWithPersistence(){
   _fsInstance=firebase.firestore();
   if(!_fsPersistenceTried){
     _fsPersistenceTried=true;
+    // Long-polling forcado: o transporte padrao (streaming) depende de "pings"
+    // do canal que adblockers/extensoes de privacidade bloqueiam
+    // (ERR_BLOCKED_BY_CLIENT), travando o catalogo no meio do download. O
+    // long-polling usa apenas requisicoes XHR normais e evita esse bloqueio.
+    try{
+      _fsInstance.settings({experimentalForceLongPolling:true,experimentalAutoDetectLongPolling:false});
+    }catch(e){ try{ console.warn('Firestore: ajuste de transporte indisponivel', e); }catch(e2){} }
     try{
       _fsInstance.enablePersistence().then(function(){
         try{ console.info('Firestore: persistencia offline ativa (IndexedDB)'); }catch(e){}
