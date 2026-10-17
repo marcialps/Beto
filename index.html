@@ -1874,6 +1874,173 @@ const DB = (function(){
     }catch(e){ console.error('FB backfill index',e); return false; }
   }
 
+  // --- Backfill de miniaturas (produtos antigos) ---
+  // Produtos cadastrados antes das miniaturas nao tem "thumbs": a grade
+  // baixaria a foto grande de cada card. Este servico roda apenas no painel
+  // admin, em segundo plano e sem travar a interface: baixa a foto original
+  // UMA vez, gera a versao leve (480px WebP), envia ao Storage e grava a URL
+  // no produto completo e no indice leve. Da proxima visita em diante a grade
+  // usa a imagem pequena; a foto grande so entra no detalhe (sob demanda).
+  // Cada produto e tentado uma vez por sessao; falhas ficam marcadas por 15
+  // dias para nao gastar banda repetindo imagens quebradas/antigas.
+  const THUMB_MAX_PX=480;
+  const THUMB_FAIL_KEY='agrovel_thumb_fails';
+  const THUMB_FAIL_RETRY_MS=15*24*60*60*1000;
+  let _thumbsBackfillRunning=false;
+  let _thumbsBackfillLogged=false;
+  const _thumbsTried={};
+  let _thumbRevIds=[];
+
+  function _thumbFailsLoad(){
+    try{
+      var o=JSON.parse(localStorage.getItem(THUMB_FAIL_KEY)||'{}');
+      return (o&&typeof o==='object')?o:{};
+    }catch(e){ return {}; }
+  }
+  function _thumbFailsSave(fails){
+    try{
+      var keys=Object.keys(fails);
+      if(keys.length>3000){
+        keys.sort(function(a,b){ return fails[a]-fails[b]; });
+        for(var i=0;i<keys.length-3000;i++) delete fails[keys[i]];
+      }
+      localStorage.setItem(THUMB_FAIL_KEY,JSON.stringify(fails));
+    }catch(e){}
+  }
+  function _thumbFailMark(fails,id){ fails[id]=Date.now(); _thumbFailsSave(fails); }
+  function _thumbFailDrop(fails,id){ if(fails[id]){ delete fails[id]; _thumbFailsSave(fails); } }
+
+  // Carrega a imagem para o canvas. crossOrigin anonimo permite exportar o
+  // thumb mesmo vindo do Storage; se o servidor nao cooperar, cai no timeout.
+  function _loadImageForThumb(src){
+    return new Promise(function(resolve){
+      var img=new Image();
+      var done=false;
+      function fin(v){ if(done) return; done=true; resolve(v); }
+      var to=setTimeout(function(){ fin(null); },20000);
+      img.onload=function(){ clearTimeout(to); fin(img); };
+      img.onerror=function(){ clearTimeout(to); fin(null); };
+      try{ img.crossOrigin='anonymous'; }catch(e){}
+      img.src=src;
+    });
+  }
+
+  function _makeThumbDataURL(img){
+    try{
+      var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+      if(!w||!h) return '';
+      if(w>THUMB_MAX_PX||h>THUMB_MAX_PX){
+        var r=Math.min(THUMB_MAX_PX/w,THUMB_MAX_PX/h);
+        w=Math.max(1,Math.round(w*r)); h=Math.max(1,Math.round(h*r));
+      }
+      var canvas=document.createElement('canvas');
+      canvas.width=w; canvas.height=h;
+      var ctx=canvas.getContext('2d');
+      ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h);
+      ctx.drawImage(img,0,0,w,h);
+      var webp=canvas.toDataURL('image/webp',0.75);
+      if(webp.indexOf('data:image/webp')===0) return webp;
+      return canvas.toDataURL('image/jpeg',0.75);
+    }catch(e){ return ''; }
+  }
+
+  // Grava a miniatura nos dois lugares (produto completo + indice leve, quando
+  // existir), atualiza a copia em memoria/baseline e avisa os visitantes. O
+  // aviso vai em lotes: _touchMetaRevision incrementa a revisao, o que faz os
+  // caches dos visitantes baixarem apenas esses produtos no proximo acesso.
+  async function _applyThumb(id,url){
+    const FV=firebase.firestore.FieldValue;
+    const upd={thumbs:[url],updatedAt:FV.serverTimestamp()};
+    const batch=fire.db.batch();
+    batch.set(productsCol().doc(id),upd,{merge:true});
+    if(_idxWritesEnabled()) batch.set(indexCol().doc(id),upd,{merge:true});
+    await batch.commit();
+    const list=Array.isArray(mem['products'])?mem['products']:[];
+    for(let i=0;i<list.length;i++){
+      if(list[i]&&list[i].id===id){
+        list[i].thumbs=[url];
+        _productsBaseline[id]=JSON.stringify(list[i]);
+        _markProductsChanged(i,i+1);
+        break;
+      }
+    }
+    _thumbRevIds.push(id);
+    if(_thumbRevIds.length>=50){
+      const ids=_thumbRevIds; _thumbRevIds=[];
+      _touchMetaRevision(ids,null);
+    }
+  }
+
+  async function _maybeBackfillThumbs(){
+    if(_thumbsBackfillRunning) return false;
+    if(!fire.db) return false;
+    // Somente equipe (admin/vendedor): visitantes nunca geram miniaturas.
+    let role='';
+    try{
+      const u=DB.currentUser();
+      role=(u&&u.role)||'';
+    }catch(e){}
+    if(role!=='admin'&&role!=='seller') return false;
+    const fails=_thumbFailsLoad();
+    const list=Array.isArray(mem['products'])?mem['products']:[];
+    const cands=[];
+    for(let i=0;i<list.length;i++){
+      const p=list[i];
+      if(!p||!p.id||!p.images||!p.images[0]) continue;
+      if(p.thumbs&&p.thumbs[0]) continue;
+      if(_thumbsTried[p.id]) continue;
+      const f=fails[p.id];
+      if(f&&(Date.now()-Number(f))<THUMB_FAIL_RETRY_MS) continue;
+      if(String(p.images[0]).indexOf('idb:')===0) continue;
+      cands.push(p);
+    }
+    if(!cands.length) return false;
+    _thumbsBackfillRunning=true;
+    try{
+      if(!_thumbsBackfillLogged){
+        _thumbsBackfillLogged=true;
+        console.info('Agrovel: gerando miniaturas de '+cands.length+' produto(s) antigo(s) em segundo plano...');
+      }
+      let ok=0, fail=0, imgStreak=0, upStreak=0;
+      for(let j=0;j<cands.length;j++){
+        const p=cands[j];
+        _thumbsTried[p.id]=1;
+        try{
+          const img=await _loadImageForThumb(String(p.images[0]));
+          const dataUrl=img?_makeThumbDataURL(img):'';
+          if(!dataUrl){
+            fail++; imgStreak++; _thumbFailMark(fails,p.id);
+            if(imgStreak>=20){ console.warn('Agrovel: muitas imagens inacessiveis; pausando miniaturas nesta sessao.'); break; }
+            continue;
+          }
+          imgStreak=0;
+          const url=await uploadProductImage(dataUrl,p.id);
+          const s=String(url||'');
+          if(!s||s.indexOf('data:')===0||s.indexOf('idb:')===0){
+            fail++; upStreak++;
+            if(upStreak>=5){ console.warn('Agrovel: Storage recusou os envios; pausando miniaturas nesta sessao.'); break; }
+            continue;
+          }
+          upStreak=0;
+          await _applyThumb(p.id,s);
+          _thumbFailDrop(fails,p.id);
+          ok++;
+          if(ok%50===0) console.info('Agrovel: '+ok+' miniaturas geradas nesta rodada...');
+        }catch(e){
+          fail++;
+          console.error('Agrovel backfill thumb '+p.id,e);
+        }
+        // Pausa curta entre produtos: mantem o admin fluido e nao satura a rede.
+        await new Promise(function(res){ setTimeout(res,120); });
+      }
+      if(_thumbRevIds.length){ _touchMetaRevision(_thumbRevIds,null); _thumbRevIds=[]; }
+      console.info('Agrovel: miniaturas desta rodada: '+ok+' concluidas, '+fail+' falhas.');
+      return true;
+    }finally{
+      _thumbsBackfillRunning=false;
+    }
+  }
+
   async function flushProducts(){
     timers['products']=null;
     _productsDirty=false;
@@ -1998,6 +2165,7 @@ const DB = (function(){
     _startMetaListener: function(){ startMetaListener(); return true; },
     _flushAll: flushAll,
     _maybeBackfillIndex: function(){ return _maybeBackfillIndex(); },
+    _maybeBackfillThumbs: function(){ return _maybeBackfillThumbs().catch(function(e){ console.error('Agrovel backfill thumbs',e); return false; }); },
     productsVersion: function(){ return _productsVersion; },
     _clearEventsMemo:function(){
       if(timers['events']) clearTimeout(timers['events']);
@@ -2516,9 +2684,10 @@ function cartImg(item){
 }
 
 // Imagem da grade: quando existe miniatura (thumbs[0]) servida pelo Storage,
-// o navegador baixa ~320px no celular em vez da foto de 900px; telas grandes
-// continuam recebendo a foto completa. Refs locais (idb:)/base64 sao ignorados
-// no srcset para nao quebrar a selecao do navegador.
+// ela e a imagem PADRAO do card (catalogo leve: o celular baixa ~480px em vez
+// da foto de 900px). O srcset deixa a foto completa so para telas grandes com
+// alta densidade de pixels. Refs locais (idb:)/base64 sao ignorados no srcset
+// para nao quebrar a selecao do navegador.
 function productThumbURL(p){
   var t=p&&p.thumbs&&p.thumbs[0];
   if(!t) return '';
@@ -2529,9 +2698,16 @@ function productThumbURL(p){
 function cardImgOpts(p,base){
   var t=productThumbURL(p);
   if(!t||t===(p.images&&p.images[0])) return base;
-  base.srcset=t+' 320w, '+p.images[0]+' 900w';
+  base.srcset=t+' 480w, '+p.images[0]+' 900w';
   base.sizes='(max-width: 640px) 50vw, 300px';
   return base;
+}
+// src do card do catalogo: miniatura quando existir (carregamento leve),
+// foto completa apenas como fallback de produtos ainda sem miniatura.
+function productCardImgSrc(p){
+  var t=productThumbURL(p);
+  if(t) return t;
+  return (p&&p.images&&p.images[0])||'';
 }
 
 function getCarouselHighlights(){
@@ -3249,8 +3425,10 @@ function notifyProductsFullyLoaded(){
   }
   else if(State.view==='admin'){
     // Catalogo acabou de chegar por completo: bom momento para criar o indice
-    // leve (se ainda nao existir) e para redesenhar as telas dependentes.
+    // leve (se ainda nao existir) e para gerar miniaturas dos produtos antigos,
+    // e para redesenhar as telas dependentes.
     try{ DB._maybeBackfillIndex(); }catch(e){}
+    try{ DB._maybeBackfillThumbs(); }catch(e){}
     if(State.adminSection==='products'){
       try{ if(!syncAdminProducts()) renderAdminSection(); }catch(e){}
     }
@@ -3458,7 +3636,7 @@ function updateCatalogResults(keepPage){
 function renderProductCard(p){
   return'<div data-pid="'+p.id+'" class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
     '<div class="relative overflow-hidden h-52 bg-white">'+
-      imgFrame(p.images[0],p,0,cardImgOpts(p,{alt:p.name,hover:true,pad:'6%',lazy:true}))+
+      imgFrame(productCardImgSrc(p),p,0,cardImgOpts(p,{alt:p.name,hover:true,pad:'6%',lazy:true}))+
       (p.featured?'<div class="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-star mr-1"></i>Destaque</div>':'')+
       (p.prescription?'<div class="absolute bottom-3 right-3 bg-amber-500/90 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-prescription mr-1"></i>Receita</div>':'')+
       '<div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">'+
@@ -3704,7 +3882,7 @@ function renderProductDetail(id){
         '</div>'+
         '<div class="flex gap-3" id="main-thumbs">'+
           p.images.map(function(img,i){return '<button onclick="setMainImage(\''+p.id+'\','+i+')" class="w-20 h-20 rounded-xl overflow-hidden border-2 transition-colors bg-gray-100 '+(i===0?'border-green-500':'border-green-200')+'">'+
-            thumbImg(img,p,i,'Foto '+(i+1),i>0)+
+            thumbImg((p.thumbs&&p.thumbs[i])?p.thumbs[i]:img,p,i,'Foto '+(i+1),i>0)+
           '</button>'}).join('')+
         '</div>'+
       '</div>'+
@@ -4850,8 +5028,10 @@ function renderAdminSection(){
   const el=document.getElementById('admin-content');
   if(!el) return;
   // Sessao admin + catalogo completo em memoria = oportunidade de criar/atualizar
-  // o indice leve (products_index) usado pelos visitantes. Guardado e silencioso.
+  // o indice leve (products_index) usado pelos visitantes e de gerar as
+  // miniaturas dos produtos antigos. Guardado e silencioso.
   try{ DB._maybeBackfillIndex(); }catch(e){}
+  try{ DB._maybeBackfillThumbs(); }catch(e){}
   // Fotos que ficaram presas no armazenamento local (idb:) sao reenviadas ao
   // Storage automaticamente neste aparelho (roda uma vez por minuto).
   try{ repairProductsMedia(); }catch(e){}
@@ -5272,7 +5452,7 @@ function adminProductRowHTML(p){
   const u=DB.currentUser();
   return'<tr class="border-b border-gray-50 hover:bg-green-50/30 transition-colors" data-pid="'+p.id+'" data-name="'+p.name.toLowerCase()+'" data-category="'+p.category+'">'+
     '<td class="px-5 py-4"><div class="flex items-center gap-3">'+
-      '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(p.images[0],p,0,p.name)+'</div>'+
+      '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(productCardImgSrc(p),p,0,p.name)+'</div>'+
       '<div><div class="font-medium text-gray-900 text-sm">'+p.name+'</div><div class="text-xs text-gray-400">SKU: '+p.sku+'</div></div></div></td>'+
     '<td class="px-5 py-4"><span class="text-xs bg-green-100 text-green-700 px-2.5 py-1 rounded-full font-medium">'+p.category+'</span></td>'+
     '<td class="px-5 py-4"><div class="font-bold text-green-700 text-sm">'+fmt(p.price)+'</div>'+(p.originalPrice?'<div class="text-xs text-gray-400 line-through">'+fmt(p.originalPrice)+'</div>':'')+'</td>'+
@@ -6035,7 +6215,7 @@ function renderAdminHighlights(){
         (products.length===0?'<div class="p-10 text-center text-gray-400"><div class="text-5xl mb-3"><i class="fas fa-box-open"></i></div><p>Nenhum produto cadastrado.</p></div>':
         products.map(function(p){
           return '<div class="p-4 md:p-5 flex items-center gap-4 hover:bg-green-50/30 transition-colors" data-name="'+(p.name||'').toLowerCase()+'">'+
-            '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(p.images[0],p,0,p.name)+'</div>'+
+            '<div class="w-12 h-12 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">'+thumbImg(productCardImgSrc(p),p,0,p.name)+'</div>'+
             '<div class="flex-1 min-w-0">'+
               '<div class="flex items-center gap-2 flex-wrap"><span class="font-medium text-gray-900 text-sm truncate">'+p.name+'</span>'+
                 (p.featured?'<span class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold flex-shrink-0"><i class="fas fa-star mr-0.5"></i>Destaque</span>':'')+
@@ -6964,7 +7144,7 @@ function compressImage(file, cb){
         return canvas.toDataURL('image/jpeg',quality);
       }
       var full=render(900,0.8);
-      var thumb=render(320,0.75);
+      var thumb=render(480,0.75);
       cb(full,file.name,thumb);
     };
     img.onerror=function(){cb(e.target.result,file.name,'')};
@@ -7096,7 +7276,7 @@ function renderImagePreviews(){
     syncFocal();
     syncImages();
   }
-  // Chips usam miniaturas (320px) quando disponiveis: previews leves em vez de
+  // Chips usam miniaturas (480px) quando disponiveis: previews leves em vez de
   // dezenas de data URLs de 900px no editor.
   var all=_existingImages.map(function(u,i){return _existingThumbs[i]||u}).concat(_pendingImages.map(function(x){return x.thumb||x.src}));
   all.forEach(function(url,gi){
@@ -7349,7 +7529,7 @@ function saveProduct(e,id,retried){
       images=rawImages.split('\n').map(function(t){return t.trim()}).filter(Boolean);
     }
     if(!images.length){images=['https://picsum.photos/seed/'+genId()+'/600/500'];}
-    // Miniaturas (320px) alinhadas as imagens completas; null onde nao existe.
+    // Miniaturas (480px) alinhadas as imagens completas; null onde nao existe.
     var rawThumbs=f.get('thumbs');
     var thumbs=[];
     try{thumbs=JSON.parse(rawThumbs)||[]}catch{thumbs=[];}
