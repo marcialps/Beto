@@ -997,7 +997,7 @@ const DB = (function(){
   const PRODUCTS_PAGE_UP_MS_PER_DOC = 2;
   const PRODUCTS_PAGE_DOWN_MS_BASE = 1000;
   const PRODUCTS_PAGE_DOWN_MS_PER_DOC = 8;
-  let PRODUCTS_PAGE_SIZE = PRODUCTS_PAGE_SIZE_MEDIUM;
+  let PRODUCTS_PAGE_SIZE = 30;
   // Anti-oscilacao: quantas consultas rapidas seguidas sao necessarias para
   // aumentar o lote. Cresce a cada reducao (cap 8) para nao ficar alternando
   // de tamanho em conexoes intermediarias.
