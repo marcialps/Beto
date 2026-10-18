@@ -652,7 +652,13 @@ const DB = (function(){
         var c=JSON.parse(raw);
         if(c&&c.v===LOCAL_CACHE_VER){
           CRITICAL_KEYS.forEach(function(k){ if(c[k]!==undefined) mem[k]=c[k]; });
-          if(c.products_meta&&typeof c.products_meta.total==='number') mem['products_meta']=c.products_meta;
+          if(c.products_meta&&typeof c.products_meta.total==='number'){
+            mem['products_meta']=c.products_meta;
+            // Restaura cedo o estado do indice leve: visitante que ja sabia da
+            // existencia do indice volta a ler os documentos enxutos desde a
+            // PRIMEIRA consulta (vitrine/destaques), sem esperar o meta chegar.
+            mem['_idxComplete']=!!(typeof c.products_meta.idxTotal==='number'&&c.products_meta.idxTotal===c.products_meta.total);
+          }
           has=true;
         }
       }
@@ -774,53 +780,74 @@ const DB = (function(){
     }
   }
 
-  // Ordem de carregamento em fases, para o site aparecer o mais rapido possivel:
-  //  FASE 1 - popup de promocoes + 7 produtos em destaque (consulta dedicada)
-  //           + categorias/highlights. Tudo em paralelo e leve: o popup e o
-  //           carrossel aparecem na hora, sem esperar o catalogo.
-  //  FASE 2 - demais dados leves (usuarios, carrinho, depoimentos).
-  //  FASE 3 - iniciada em segundo plano ASSIM QUE A FASE 1 termina (sem esperar
-  //           o usuario fechar o popup): consulta separada dos mais visualizados
-  //           (lista inicial) + restante do catalogo em lotes. Quando o popup
-  //           fecha, a vitrine ja esta pronta por tras dele.
+  // Ordem de carregamento em fases, para o site aparecer o mais rapido possivel.
+  // Cada bloco renderiza por conta propria assim que o SEU dado chega; nenhum
+  // bloco espera os outros - o mais lento nao atrasa popup, carrossel nem grade:
+  //  FASE 0 - vitrine inicial (15 mais visualizados + lote alfabetico) disparada
+  //           de imediato; a grade aparece assim que os mais visualizados chegam.
+  //  FASE 3 - catalogo (reaproveita a vitrine da FASE 0) disparado de imediato,
+  //           sem esperar promocoes, destaques, categorias ou meta.
+  //  FASE 1 - popup de promocoes, destaques (consulta dedicada), categorias,
+  //           highlights e meta: cada consulta renderiza o seu proprio bloco
+  //           quando chega (popup, carrossel, menus, contadores).
+  //  FASE 2 - demais dados leves (usuarios, carrinho, depoimentos), tambem
+  //           independentes da vitrine.
   async function loadCritical(onPromoReady, onStageReady){
     mem['_loading']=true;
     mem['_loadError']=false;
     const gen = ++_productsLoadGen;
     _productsComplete=false;
 
-    // FASE 1
+    // FASE 0: dispara a vitrine inicial de imediato. Com cache local o caminho
+    // rapido (_tryCachedCatalog) cuida de tudo e nada e disparado aqui.
+    if(!(Array.isArray(mem['products'])&&mem['products'].length)){
+      try{ _topViewedSeed(gen); }catch(e){}
+      try{ _alphaBatchSeed(gen); }catch(e){}
+    }
+
+    // FASE 3 de imediato: o download do catalogo nao espera nenhum outro bloco.
+    // (startCatalog e idempotente por geracao: fechar o popup depois vira no-op.)
+    startCatalog();
+
+    // FASE 1: cada consulta dispara o render do SEU bloco assim que chega, sem
+    // esperar as demais. O popup abre com as promocoes; o carrossel atualiza
+    // com os destaques/highlights; os menus com as categorias; os contadores
+    // com o meta (loadProductsMeta notifica por conta propria).
     const promoJob = _fetchOne('promos').then(function(){
       if(typeof onPromoReady==='function'){
         try{onPromoReady();}catch(e){}
       }
       saveCache();
     }).catch(function(){});
-    await Promise.all([
-      promoJob,
-      _fetchFeaturedProducts(gen),
-      _fetchOne('categories'),
-      _fetchOne('highlights'),
-      loadProductsMeta()
+    const featuredJob = _fetchFeaturedProducts(gen).then(function(){ saveCache(); }).catch(function(){});
+    const categoriesJob = _fetchOne('categories').then(function(){
+      try{ renderCategoryNavs(); }catch(e){}
+      saveCache();
+    }).catch(function(){});
+    const highlightsJob = _fetchOne('highlights').then(function(){
+      try{ notifyHighlightsLoaded(); }catch(e){}
+      saveCache();
+    }).catch(function(){});
+    const metaJob = loadProductsMeta();
+
+    // FASE 2 em paralelo com a FASE 1: dados leves restantes.
+    const restJob = Promise.all([
+      _fetchOne('users'),
+      _fetchOne('cart'),
+      _fetchOne('testimonials')
     ]);
+
+    // Render de consolidacao ao terminar a FASE 1. Como cada bloco ja renderizou
+    // por conta propria, este passo so garante o estado final (ex.: telas de
+    // blog/admin) sem bloquear nenhum bloco individualmente.
+    await Promise.all([promoJob, featuredJob, categoriesJob, highlightsJob, metaJob]);
     if(_productsLoadGen!==gen) return;
     saveCache();
     if(typeof onStageReady==='function'){
       try{onStageReady();}catch(e){}
     }
 
-    // FASE 3 em segundo plano: nao aguardada e nao bloqueada pelo popup. Roda
-    // em paralelo com a FASE 2 para que os mais visualizados + catalogo cheguem
-    // enquanto o usuario ainda esta vendo as promocoes. (startCatalog e
-    // idempotente por geracao: fechar o popup depois vira no-op.)
-    startCatalog();
-
-    // FASE 2
-    await Promise.all([
-      _fetchOne('users'),
-      _fetchOne('cart'),
-      _fetchOne('testimonials')
-    ]);
+    await restJob;
     mem['_productsReady']=true;
     saveCache();
   }
@@ -953,30 +980,45 @@ const DB = (function(){
   const PRODUCTS_FIRST_BATCH = 15;
   // Tamanho do lote da paginacao do catalogo, ajustado em tempo real (abordagem 2):
   // em vez de confiar so no tipo de rede do aparelho, o app cronometra as
-  // consultas reais ao Firestore e adapta o lote ao que a conexao de verdade
-  // esta entregando. Conexao ruim: 25; boa: 250; muito boa: 500.
+  // consultas REAIS ao Firestore e adapta o lote ao que a conexao de verdade
+  // esta entregando. PADRAO: 250 (poucas idas ao servidor e primeira tela
+  // rapida); so reduz para 25 quando as paginas reais provam lentidao; so
+  // sobe para 500 quando varias paginas seguidas vierem muito rapidas.
   const PRODUCTS_PAGE_SIZE_SLOW = 25;
   const PRODUCTS_PAGE_SIZE_MEDIUM = 250;
   const PRODUCTS_PAGE_SIZE_FAST = 500;
-  // Limiares por consulta paginada (ms): acima de DOWN o lote reduz na hora;
-  // abaixo de UP por varias consultas seguidas o lote aumenta.
-  const PRODUCTS_PAGE_DOWN_MS = 2500;
-  const PRODUCTS_PAGE_UP_MS = 900;
+  // Limiares por consulta paginada (ms), modelo fixo + proporcional:
+  //   rapida: tempo <= BASE_UP + PER_DOC_UP * limit
+  //   lenta : tempo >= BASE_DOWN + PER_DOC_DOWN * limit
+  // O custo fixo (ida/volta + indice) nao depende do tamanho do lote; o
+  // proporcional acompanha a transferencia dos documentos. Assim o mesmo
+  // limite vale para lotes de 25, 250 e 500.
+  const PRODUCTS_PAGE_UP_MS_BASE = 350;
+  const PRODUCTS_PAGE_UP_MS_PER_DOC = 2;
+  const PRODUCTS_PAGE_DOWN_MS_BASE = 1000;
+  const PRODUCTS_PAGE_DOWN_MS_PER_DOC = 8;
   let PRODUCTS_PAGE_SIZE = PRODUCTS_PAGE_SIZE_MEDIUM;
   // Anti-oscilacao: quantas consultas rapidas seguidas sao necessarias para
   // aumentar o lote. Cresce a cada reducao (cap 8) para nao ficar alternando
   // de tamanho em conexoes intermediarias.
   let _pageFastStreak = 0;
-  let _pageUpNeeded = 3;
+  let _pageUpNeeded = 2;
+  // Excedente da conexao fria: a PRIMEIRA consulta da sessao inclui DNS/TLS/
+  // canal e demora segundos mesmo em conexao boa. O valor fica guardado para
+  // descontar o mesmo excedente do primeiro lote real: era essa abertura que
+  // rebaixava o lote padrao (250) para 25 logo de cara em toda visita.
+  let _seedColdMs = 0;
   // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
   // carrossel abrir ja completo (ate 5 slides) em vez de 1/5 enquanto o
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
   // mem['products'] para nao quebrar a ordem alfabetica do catalogo.
   const PRODUCTS_FEATURED_BATCH = 7;
-  // Ranking de mais visualizados: consulta dedicada, disparada somente quando o
-  // popup de promocoes fecha. Traz uma vitrine inicial enquanto o restante do
-  // catalogo continua chegando em lotes, em segundo plano.
-  const PRODUCTS_TOP_VIEWED = 25;
+  // Ranking de mais visualizados: consulta dedicada, disparada em paralelo com
+  // a FASE 1 (sem esperar o popup). Traz a vitrine inicial enquanto o restante
+  // do catalogo continua chegando em lotes, em segundo plano. O limite e igual
+  // ao CATALOG_PAGE_SIZE (15): a primeira tela precisa exatamente disso, e
+  // cada documento a menos e banda que nao disputa com as demais consultas.
+  const PRODUCTS_TOP_VIEWED = 15;
   let _topViewed = [];
   let _topViewedReady = false;
   let _topViewedFromViews = true;
@@ -1119,25 +1161,37 @@ const DB = (function(){
     try{ console.info('Conexao: lote de produtos '+prev+' -> '+next+' (consulta em '+Math.round(ms)+' ms)'); }catch(e){}
   }
 
-  // Mede uma consulta pequena de abertura (seed/destaques). Serve apenas para
-  // REDUZIR o lote quando a conexao ja se mostra lenta; o aumento e decidido
-  // pelas paginas reais (_recordPageTiming), que trafegam mais dados.
+  // Limite rapido (ms) de uma consulta que trouxe `limit` produtos.
+  function _pageFastMs(limit){ return PRODUCTS_PAGE_UP_MS_BASE + PRODUCTS_PAGE_UP_MS_PER_DOC*limit; }
+  // Limite lento (ms) de uma consulta que trouxe `limit` produtos.
+  function _pageSlowMs(limit){ return PRODUCTS_PAGE_DOWN_MS_BASE + PRODUCTS_PAGE_DOWN_MS_PER_DOC*limit; }
+
+  // Mede uma consulta pequena de abertura (seed/destaques/mais vistos). NAO
+  // reduz o lote por si so: a primeira consulta da sessao inclui a montagem da
+  // conexao e demora mesmo em conexao boa - era isso que prendia o catalogo em
+  // 25. O valor fica guardado para perdoar o mesmo excedente de conexao fria
+  // na primeira pagina real (ver _recordPageTiming).
   function _recordSeedTiming(ms){
     if(typeof ms!=='number' || !isFinite(ms) || ms<0) return;
-    if(ms>PRODUCTS_PAGE_DOWN_MS){
-      _pageFastStreak=0;
-      if(PRODUCTS_PAGE_SIZE!==PRODUCTS_PAGE_SIZE_SLOW) _pageUpNeeded=Math.min(_pageUpNeeded+1, 8);
-      _setProductsPageSize(PRODUCTS_PAGE_SIZE_SLOW, ms);
-    }
+    if(ms>_seedColdMs) _seedColdMs=ms;
   }
 
   // Mede uma pagina real do restante do catalogo e adapta o lote:
-  // - consulta lenta (acima de PRODUCTS_PAGE_DOWN_MS): reduz um nivel na hora;
-  // - consultas rapidas seguidas (ate PRODUCTS_PAGE_UP_MS): sobe um nivel
-  //   (25 -> 250 -> 500), exigindo _pageUpNeeded medidas seguidas.
-  function _recordPageTiming(ms){
+  // - consulta acima do limite lento do lote: reduz um nivel na hora
+  //   (250 -> 25 quando a transferencia dos produtos esta ruim);
+  // - consultas abaixo do limite rapido, seguidas (_pageUpNeeded): sobe um
+  //   nivel (250 -> 500);
+  // - tempo intermediario: conexao "boa" para o tamanho atual; nao mexe.
+  // first=true desconta o excedente de conexao fria medido na abertura, para o
+  // primeiro lote nao ser punido pelo tempo de montagem da conexao.
+  function _recordPageTiming(ms, limit, first){
     if(typeof ms!=='number' || !isFinite(ms) || ms<0) return;
-    if(ms>PRODUCTS_PAGE_DOWN_MS){
+    if(typeof limit!=='number'||limit<=0) limit=PRODUCTS_PAGE_SIZE;
+    var cold=0;
+    if(first&&_seedColdMs>PRODUCTS_PAGE_UP_MS_BASE) cold=Math.min(_seedColdMs-PRODUCTS_PAGE_UP_MS_BASE, 2500);
+    const fastMs=_pageFastMs(limit)+cold;
+    const slowMs=_pageSlowMs(limit)+cold;
+    if(ms>slowMs){
       _pageFastStreak=0;
       const next=PRODUCTS_PAGE_SIZE===PRODUCTS_PAGE_SIZE_FAST?PRODUCTS_PAGE_SIZE_MEDIUM:PRODUCTS_PAGE_SIZE_SLOW;
       if(next!==PRODUCTS_PAGE_SIZE){
@@ -1146,7 +1200,7 @@ const DB = (function(){
       }
       return;
     }
-    if(ms<=PRODUCTS_PAGE_UP_MS){
+    if(ms<=fastMs){
       _pageFastStreak++;
       if(_pageFastStreak>=_pageUpNeeded){
         _pageFastStreak=0;
@@ -1156,7 +1210,6 @@ const DB = (function(){
       }
       return;
     }
-    // Tempo intermediario: conexao "boa" para o tamanho atual; nao mexe.
     _pageFastStreak=0;
   }
 
@@ -1213,6 +1266,7 @@ const DB = (function(){
     try{
       var last = startAfterDoc || null;
       var resume = (!last && resumeCursor) ? resumeCursor : null;
+      var firstTiming = true;
       while(true){
         if(_productsLoadGen!==gen) return;
         const limit = PRODUCTS_PAGE_SIZE;
@@ -1241,7 +1295,8 @@ const DB = (function(){
           }
           throw err;
         }
-        _recordPageTiming(_pageClock() - _t0);
+        _recordPageTiming(_pageClock() - _t0, limit, firstTiming);
+        firstTiming = false;
         if(_productsLoadGen!==gen) return;
         if(snap.empty) break;
         appendProducts(snap.docs.map(function(d){return d.data()}));
@@ -1515,7 +1570,9 @@ const DB = (function(){
     _featuredProducts = [];
     if(!fire.db) return;
     try{
-      const col = productsCol();
+      // Colecao leve (products_index) quando o indice esta completo: o
+      // carrossel so precisa de campos leves e abre bem mais rapido.
+      const col = _catalogReadCol();
       const snap = await _withRetry(function(){return col.where('featured','==',true).limit(PRODUCTS_FEATURED_BATCH).get();}, 'destaques');
       if(_productsLoadGen!==gen) return;
       const list = snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id});
@@ -1530,13 +1587,16 @@ const DB = (function(){
   // Consulta separada (indice simples, campo "views"): os produtos mais
   // visualizados do site. Esta passa a ser a PRIMEIRA consulta do catalogo,
   // substituindo o primeiro lote alfabetico: o resultado e exibido na hora.
+  // Le da colecao leve (products_index) quando ela esta completa: os cards da
+  // vitrine precisam apenas dos campos leves, e o documento enxuto abre a
+  // primeira tela em uma fracao do tempo do documento completo.
   // Se nenhum produto tiver contador ainda, cai para o lote alfabetico. O
   // restante do catalogo continua chegando em segundo plano (_loadRemainingPages).
   async function _fetchTopViewed(gen){
     if(!fire.db){ _topViewedReady=true; return false; }
     const tgen=++_topViewedGen;
     try{
-      const col=productsCol();
+      const col=_catalogReadCol();
       var _t0=_pageClock();
       var snap=await _withRetry(function(){return col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos');
       _recordSeedTiming(_pageClock()-_t0);
@@ -1722,9 +1782,32 @@ const DB = (function(){
     }
   }
 
-  // FASE 3 (disparada em segundo plano ao terminar a FASE 1, sem esperar o
-  // popup): consulta separada dos mais visualizados (seed instantaneo) +
-  // paginacao do restante. Idempotente por geracao.
+  // Memoizacao das consultas de semente por geracao: quando a carga ja disparou
+  // a vitrine em paralelo com a FASE 1 (loadCritical), o startCatalog reaproveita
+  // a MESMA promessa em vez de repetir as consultas - cada repeticao custaria
+  // megabytes na conexao lenta do visitante.
+  let _seedTopViewedJob=null;
+  let _seedAlphaBatchJob=null;
+  function _topViewedSeed(gen){
+    if(!(_seedTopViewedJob&&_seedTopViewedJob.gen===gen)){
+      let p;
+      try{ p=_fetchTopViewed(gen); }catch(e){ p=Promise.resolve(false); }
+      _seedTopViewedJob={gen:gen,promise:p};
+    }
+    return _seedTopViewedJob.promise;
+  }
+  function _alphaBatchSeed(gen){
+    if(!(_seedAlphaBatchJob&&_seedAlphaBatchJob.gen===gen)){
+      let p;
+      try{ p=_fetchFirstAlphaBatch(gen); }catch(e){ p=Promise.resolve({list:[],startAfterDoc:null,byName:true}); }
+      _seedAlphaBatchJob={gen:gen,promise:p};
+    }
+    return _seedAlphaBatchJob.promise;
+  }
+
+  // FASE 3 (disparada de imediato na abertura, sem esperar popup/destaques/
+  // categorias/meta): consulta separada dos mais visualizados (seed instantaneo)
+  // + paginacao do restante. Idempotente por geracao.
   async function startCatalog(){
     if(!fire.db) return;
     const gen = _productsLoadGen;
@@ -1740,8 +1823,8 @@ const DB = (function(){
     if(_productsLoadGen!==gen) return;
 
     const [topViewedResult, alphaBatchResult] = await Promise.all([
-      _fetchTopViewed(gen),
-      _fetchFirstAlphaBatch(gen)
+      _topViewedSeed(gen),
+      _alphaBatchSeed(gen)
     ]);
 
     if(_productsLoadGen!==gen) return;
@@ -1801,7 +1884,19 @@ const DB = (function(){
     var idx=Object.assign({},p||{});
     delete idx._idx;
     delete idx.techInfo;
-    if(Array.isArray(idx.images)) idx.images=idx.images.slice(0,1);
+    // Fotos base64 NUNCA entram no indice: cada foto carrega ~35 KB e faria o
+    // documento "leve" pesar o mesmo que o completo. O card usa a miniatura
+    // (thumbs[0], URL do Storage); produtos ainda sem miniatura ficam marcados
+    // com _legacyMedia e sao migrados em segundo plano pelo painel admin.
+    if(Array.isArray(idx.images)&&idx.images.length){
+      var firstImg=String(idx.images[0]||'');
+      if(firstImg.indexOf('data:')===0){
+        idx._legacyMedia=1;
+        delete idx.images;
+      }else{
+        idx.images=idx.images.slice(0,1);
+      }
+    }
     if(Array.isArray(idx.focalPoints)) idx.focalPoints=idx.focalPoints.slice(0,1);
     if(Array.isArray(idx.thumbs)) idx.thumbs=idx.thumbs.slice(0,1);
     idx._idx=1;
@@ -1925,12 +2020,12 @@ const DB = (function(){
     });
   }
 
-  function _makeThumbDataURL(img){
+  function _makeImageDataURL(img,maxPx,quality){
     try{
       var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
       if(!w||!h) return '';
-      if(w>THUMB_MAX_PX||h>THUMB_MAX_PX){
-        var r=Math.min(THUMB_MAX_PX/w,THUMB_MAX_PX/h);
+      if(w>maxPx||h>maxPx){
+        var r=Math.min(maxPx/w,maxPx/h);
         w=Math.max(1,Math.round(w*r)); h=Math.max(1,Math.round(h*r));
       }
       var canvas=document.createElement('canvas');
@@ -1938,27 +2033,167 @@ const DB = (function(){
       var ctx=canvas.getContext('2d');
       ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,w,h);
       ctx.drawImage(img,0,0,w,h);
-      var webp=canvas.toDataURL('image/webp',0.75);
+      var webp=canvas.toDataURL('image/webp',quality);
       if(webp.indexOf('data:image/webp')===0) return webp;
-      return canvas.toDataURL('image/jpeg',0.75);
+      return canvas.toDataURL('image/jpeg',quality);
     }catch(e){ return ''; }
   }
 
-  // Grava a miniatura nos dois lugares (produto completo + indice leve, quando
-  // existir), atualiza a copia em memoria/baseline e avisa os visitantes. O
-  // aviso vai em lotes: _touchMetaRevision incrementa a revisao, o que faz os
+  function _makeThumbDataURL(img){
+    return _makeImageDataURL(img,THUMB_MAX_PX,0.75);
+  }
+
+  // --- Migracao das fotos antigas: base64 no Firestore -> URLs do Storage ---
+  // Produtos antigos guardam as fotos em base64 DENTRO do documento (1-3 fotos
+  // de ~35 KB): cada produto chega a 100-200 KB e o catalogo inteiro passa de
+  // 100 MB - e isso que faz a PRIMEIRA TELA demorar para abrir em conexao lenta.
+  // Este servico (somente equipe, em segundo plano) envia cada foto ao Storage,
+  // gera a miniatura leve do card e regrava o produto com URLs: o documento cai
+  // para ~1 KB. Idempotente e retomavel: produto migrado deixa de ser candidato;
+  // falhas ficam marcadas por 15 dias antes de nova tentativa.
+  function _isStoredMediaURL(u){
+    return String(u||'').indexOf('http')===0;
+  }
+
+  function _mediaNeedsMigration(p){
+    if(!p||!p.id) return false;
+    if(p._legacyMedia) return true;
+    var imgs=Array.isArray(p.images)?p.images:[];
+    if(!imgs.length) return false;
+    var hasData=false, hasIdb=false, i, s;
+    for(i=0;i<imgs.length;i++){
+      s=String(imgs[i]||'');
+      if(s.indexOf('data:')===0) hasData=true;
+      else if(s.indexOf('idb:')===0) hasIdb=true;
+    }
+    // Fotos presas no aparelho (idb:) sao tratadas pelo reparo proprio que ja
+    // existe (repairProductsMedia); a migracao so age em base64 de verdade.
+    if(hasIdb) return false;
+    if(hasData) return true;
+    if(!(p.thumbs&&p.thumbs[0])) return true;
+    return false;
+  }
+
+  // Produto da lista (indice leve) -> documento completo, somente quando a
+  // lista em memoria nao tem as fotos (ex.: sessao do admin lendo o indice).
+  async function _fullDocForMigration(p){
+    if(Array.isArray(p.images)&&p.images.length&&!p._legacyMedia) return p;
+    try{
+      const snap=await productsCol().doc(p.id).get();
+      if(!snap.exists) return null;
+      const full=snap.data()||{};
+      full.id=p.id;
+      return full;
+    }catch(e){ return null; }
+  }
+
+  // Sobe as fotos base64 do produto e devolve {images,thumbs} ja com URLs.
+  // null = falhou (nada e gravado; o produto continua candidato para depois).
+  // Com thumbOnly=true (Firebase Storage indisponivel no momento), devolve
+  // {images:null,thumbs:[miniatura inline pequena]}: a vitrine continua com
+  // foto nos cards sem tocar nas fotos base64 do documento — a migracao
+  // completa roda sozinha quando o Storage voltar.
+  async function _migrateProductMedia(p,thumbOnly){
+    const srcs=Array.isArray(p.images)?p.images.slice():[];
+    if(!srcs.length) return null;
+    let thumb=(p.thumbs&&p.thumbs[0])?String(p.thumbs[0]):'';
+    if(thumbOnly){
+      if(!thumb){
+        const first=String(srcs.find(function(s){return String(s||'').length>0})||'');
+        if(first.indexOf('http')===0){
+          // URL que pode falhar no canvas (CORS): serve de miniatura mesmo assim.
+          thumb=first;
+        }else if(first){
+          const img=await _loadImageForThumb(first);
+          if(img){
+            const small=_makeImageDataURL(img,160,0.6);
+            if(small) thumb=small;
+          }
+        }
+      }
+      if(!thumb) return null;
+      return {images:null,thumbs:[thumb],storageOff:true};
+    }
+    const out=[];
+    for(let i=0;i<srcs.length;i++){
+      const src=String(srcs[i]||'');
+      if(!src) continue;
+      if(src.indexOf('data:')!==0&&src.indexOf('idb:')!==0){ out.push(src); continue; }
+      const img=await _loadImageForThumb(src);
+      if(!img){
+        // URL que o canvas nao conseguiu ler (CORS): usa a propria URL como
+        // imagem do card em vez de deixar o produto sem foto.
+        if(src.indexOf('http')===0){ out.push(src); continue; }
+        return null;
+      }
+      if(i===0&&!_isStoredMediaURL(thumb)){
+        const tData=_makeThumbDataURL(img);
+        if(tData){
+          const tUrl=await uploadProductImage(tData,p.id);
+          if(_isStoredMediaURL(tUrl)) thumb=String(tUrl);
+          else if(String(tUrl).indexOf('data:')===0){
+            // Storage recusou ate a miniatura: nao insiste na foto grande.
+            const small=_makeImageDataURL(img,160,0.6);
+            return {images:null,thumbs:[small||String(tUrl)],storageOff:true};
+          }
+        }
+      }
+      const fullData=_makeImageDataURL(img,900,0.8);
+      if(!fullData) return null;
+      const url=await uploadProductImage(fullData,p.id);
+      if(!_isStoredMediaURL(url)){
+        if(String(url).indexOf('data:')===0){
+          // Storage fora do ar: mantem as fotos do documento como estao e
+          // garante ao menos uma miniatura inline para o card nao ficar vazio.
+          const small=_makeImageDataURL(img,160,0.6);
+          const t2=thumb||small||'';
+          if(!t2) return null;
+          return {images:null,thumbs:[String(t2)],storageOff:true};
+        }
+        return null;
+      }
+      out.push(String(url));
+    }
+    if(!out.length) return null;
+    if(!thumb&&_isStoredMediaURL(out[0])) thumb=String(out[0]);
+    if(!out.some(function(s){return _isStoredMediaURL(s)})) return null;
+    return {images:out,thumbs:thumb?[thumb]:[]};
+  }
+
+  // Grava as fotos migradas nos dois lugares (produto completo + indice leve,
+  // quando existir), atualiza a copia em memoria/baseline e acumula os ids para
+  // o aviso em lotes: _touchMetaRevision incrementa a revisao, o que faz os
   // caches dos visitantes baixarem apenas esses produtos no proximo acesso.
-  async function _applyThumb(id,url){
+  // Com images=null (modo sem Storage) mexe SO nas miniaturas: as fotos do
+  // documento ficam intactas.
+  async function _applyProductMedia(id,images,thumbs){
     const FV=firebase.firestore.FieldValue;
-    const upd={thumbs:[url],updatedAt:FV.serverTimestamp()};
+    const thumb=(thumbs&&thumbs.length)?thumbs.slice(0,1):null;
+    const hasImgs=!!(images&&images.length);
+    const upd={updatedAt:FV.serverTimestamp()};
+    if(hasImgs) upd.images=images;
+    if(thumb) upd.thumbs=thumb;
     const batch=fire.db.batch();
     batch.set(productsCol().doc(id),upd,{merge:true});
-    if(_idxWritesEnabled()) batch.set(indexCol().doc(id),upd,{merge:true});
+    if(_idxWritesEnabled()){
+      const idxUpd={updatedAt:FV.serverTimestamp()};
+      if(thumb) idxUpd.thumbs=thumb;
+      // Leva a foto principal (URL curta) ao indice e remove a marca de midia
+      // antiga. Sem imagens novas (Storage fora do ar), a marca fica para a
+      // migracao completa depois.
+      if(hasImgs&&images[0]&&_isStoredMediaURL(images[0])){
+        idxUpd.images=[images[0]];
+        idxUpd._legacyMedia=FV.delete();
+      }
+      batch.set(indexCol().doc(id),idxUpd,{merge:true});
+    }
     await batch.commit();
     const list=Array.isArray(mem['products'])?mem['products']:[];
     for(let i=0;i<list.length;i++){
       if(list[i]&&list[i].id===id){
-        list[i].thumbs=[url];
+        if(hasImgs) list[i].images=images;
+        if(thumb) list[i].thumbs=thumb;
+        if(hasImgs) delete list[i]._legacyMedia;
         _productsBaseline[id]=JSON.stringify(list[i]);
         _markProductsChanged(i,i+1);
         break;
@@ -1974,7 +2209,7 @@ const DB = (function(){
   async function _maybeBackfillThumbs(){
     if(_thumbsBackfillRunning) return false;
     if(!fire.db) return false;
-    // Somente equipe (admin/vendedor): visitantes nunca geram miniaturas.
+    // Somente equipe (admin/vendedor): visitantes nunca migram fotos.
     let role='';
     try{
       const u=DB.currentUser();
@@ -1986,12 +2221,10 @@ const DB = (function(){
     const cands=[];
     for(let i=0;i<list.length;i++){
       const p=list[i];
-      if(!p||!p.id||!p.images||!p.images[0]) continue;
-      if(p.thumbs&&p.thumbs[0]) continue;
+      if(!_mediaNeedsMigration(p)) continue;
       if(_thumbsTried[p.id]) continue;
       const f=fails[p.id];
       if(f&&(Date.now()-Number(f))<THUMB_FAIL_RETRY_MS) continue;
-      if(String(p.images[0]).indexOf('idb:')===0) continue;
       cands.push(p);
     }
     if(!cands.length) return false;
@@ -1999,42 +2232,41 @@ const DB = (function(){
     try{
       if(!_thumbsBackfillLogged){
         _thumbsBackfillLogged=true;
-        console.info('Agrovel: gerando miniaturas de '+cands.length+' produto(s) antigo(s) em segundo plano...');
+        console.info('Agrovel: migrando fotos de '+cands.length+' produto(s) para o Storage em segundo plano (deixa a primeira tela quase instantanea)...');
       }
-      let ok=0, fail=0, imgStreak=0, upStreak=0;
+      let ok=0, fail=0, streak=0, storageOff=false;
       for(let j=0;j<cands.length;j++){
         const p=cands[j];
         _thumbsTried[p.id]=1;
+        // Storage fora do ar: quem ja tem miniatura inline fica como esta ate
+        // o Storage voltar (nao fica regerando/regravando a mesma miniatura).
+        if(storageOff&&p.thumbs&&p.thumbs[0]) continue;
         try{
-          const img=await _loadImageForThumb(String(p.images[0]));
-          const dataUrl=img?_makeThumbDataURL(img):'';
-          if(!dataUrl){
-            fail++; imgStreak++; _thumbFailMark(fails,p.id);
-            if(imgStreak>=20){ console.warn('Agrovel: muitas imagens inacessiveis; pausando miniaturas nesta sessao.'); break; }
+          const full=await _fullDocForMigration(p);
+          const res=full?await _migrateProductMedia(full,storageOff):null;
+          if(res&&res.storageOff&&!storageOff){
+            storageOff=true;
+            console.info('Agrovel: Firebase Storage indisponivel no momento; gerando miniaturas leves nos cards e deixando a migracao completa de fotos para quando o Storage voltar.');
+          }
+          if(!res){
+            fail++; streak++; _thumbFailMark(fails,p.id);
+            if(streak>=20){ console.warn('Agrovel: muitas fotos inacessiveis/falhas; pausando a migracao nesta sessao.'); break; }
             continue;
           }
-          imgStreak=0;
-          const url=await uploadProductImage(dataUrl,p.id);
-          const s=String(url||'');
-          if(!s||s.indexOf('data:')===0||s.indexOf('idb:')===0){
-            fail++; upStreak++;
-            if(upStreak>=5){ console.warn('Agrovel: Storage recusou os envios; pausando miniaturas nesta sessao.'); break; }
-            continue;
-          }
-          upStreak=0;
-          await _applyThumb(p.id,s);
+          streak=0;
+          await _applyProductMedia(p.id,res.images,res.thumbs);
           _thumbFailDrop(fails,p.id);
           ok++;
-          if(ok%50===0) console.info('Agrovel: '+ok+' miniaturas geradas nesta rodada...');
+          if(ok%25===0) console.info('Agrovel: '+ok+' produto(s) preparados nesta rodada...');
         }catch(e){
           fail++;
-          console.error('Agrovel backfill thumb '+p.id,e);
+          console.error('Agrovel migrar fotos '+p.id,e);
         }
         // Pausa curta entre produtos: mantem o admin fluido e nao satura a rede.
         await new Promise(function(res){ setTimeout(res,120); });
       }
       if(_thumbRevIds.length){ _touchMetaRevision(_thumbRevIds,null); _thumbRevIds=[]; }
-      console.info('Agrovel: miniaturas desta rodada: '+ok+' concluidas, '+fail+' falhas.');
+      console.info('Agrovel: migracao de fotos desta rodada: '+ok+' concluidos, '+fail+' falhas.');
       return true;
     }finally{
       _thumbsBackfillRunning=false;
@@ -2697,8 +2929,9 @@ function productThumbURL(p){
 }
 function cardImgOpts(p,base){
   var t=productThumbURL(p);
-  if(!t||t===(p.images&&p.images[0])) return base;
-  base.srcset=t+' 480w, '+p.images[0]+' 900w';
+  var main=(p&&p.images&&p.images[0])||'';
+  if(!t||!main||t===main) return base;
+  base.srcset=t+' 480w, '+main+' 900w';
   base.sizes='(max-width: 640px) 50vw, 300px';
   return base;
 }
@@ -2708,6 +2941,20 @@ function productCardImgSrc(p){
   var t=productThumbURL(p);
   if(t) return t;
   return (p&&p.images&&p.images[0])||'';
+}
+// Card do catalogo: produto sem foto (ex.: documento leve antes da migracao
+// das imagens) mostra um marcador em vez de uma imagem quebrada.
+function productCardImgHTML(p){
+  var src=productCardImgSrc(p);
+  if(!src) return '<div class="w-full h-full flex items-center justify-center bg-green-50 text-green-200"><i class="fas fa-image text-4xl"></i></div>';
+  return imgFrame(src,p,0,cardImgOpts(p,{alt:p.name,hover:true,pad:'6%',lazy:true}));
+}
+// Imagem do slide de produto do carrossel: usa a foto completa quando o
+// documento tem; senao a miniatura; senao um marcador (produto do indice leve).
+function carouselProductImgHTML(p,i){
+  var src=(p&&p.images&&p.images[0])||productThumbURL(p)||'';
+  if(!src) return '<div class="w-full h-full flex items-center justify-center bg-green-50 text-green-200"><i class="fas fa-image text-5xl"></i></div>';
+  return imgFrame(src,p,0,{alt:p.name,hover:true,pad:'4%',fp:(i===0?'high':'low'),lazy:i>0});
 }
 
 function getCarouselHighlights(){
@@ -2777,7 +3024,7 @@ function carouselSlideForItem(item,i,total){
   return'<div class="carousel-slide" data-slide="'+i+'">'+
     '<div class="carousel-slide-inner cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
       '<div class="relative h-[480px] md:h-[520px] overflow-hidden rounded-3xl shadow-2xl bg-white">'+
-        imgFrame(p.images[0],p,0,{alt:p.name,hover:true,pad:'4%',fp:(i===0?'high':'low'), lazy: i>0})+
+        carouselProductImgHTML(p,i)+
         '<div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/45 to-black/10"></div>'+
         '<div class="absolute inset-x-0 bottom-0 p-7 md:p-10">'+
           '<div class="flex flex-wrap items-center gap-2 mb-3">'+
@@ -3343,8 +3590,8 @@ var _productRenderPending=false;
 var _deferredProductsStarted=false;
 
 // Disparado ao fechar o popup (ou quando nao ha popup): garante que a FASE 3
-// rode. Normalmente a FASE 3 ja foi iniciada em segundo plano ao terminar a
-// FASE 1, entao aqui costuma ser no-op; e o fallback de seguranca.
+// rode. Normalmente a FASE 3 ja foi iniciada de imediato na abertura, entao
+// aqui costuma ser no-op; e o fallback de seguranca.
 function startDeferredProductsLoad(){
   if(_deferredProductsStarted) return;
   _deferredProductsStarted=true;
@@ -3360,6 +3607,34 @@ function catalogSeedHeaderHTML(){
   return '<div id="catalog-seed-header" class="flex flex-wrap items-center justify-between gap-2 mb-5">'+
     '<h2 class="text-lg md:text-2xl font-bold text-gray-800"><i class="fas fa-fire text-amber-500 mr-2"></i>Mais visualizados</h2>'+
   '</div>';
+}
+
+// Atualiza SOMENTE o carrossel de destaques/highlights quando os itens mudam,
+// sem remontar a grade nem a pagina. Usado quando destaques, campanhas
+// (highlights) ou lotes novos do catalogo chegam depois do primeiro render.
+function refreshCatalogCarousel(){
+  var cw=document.getElementById('catalog-carousel-wrap');
+  if(!cw||cw.style.display==='none') return;
+  var items=getCarouselHighlights();
+  if(items.length!==cw.querySelectorAll('.carousel-slide').length){
+    cw.innerHTML=renderFeaturedCarousel(items);
+    featInit();
+  }
+}
+
+// Highlights (campanhas do carrossel) chegaram: renderiza por conta propria,
+// sem esperar destaques, catalogo ou qualquer outro bloco.
+function notifyHighlightsLoaded(){
+  if(State.view==='catalog'){
+    if(document.getElementById('catalog-carousel-wrap')&&window._catCatalogHadData){
+      refreshCatalogCarousel();
+      return;
+    }
+    if(document.getElementById('catalog-grid-area')) updateCatalogResults(true);
+    else render();
+  } else if(State.view==='blog'||State.view==='blog-post'||State.view==='admin'){
+    render();
+  }
 }
 
 function notifyProductsGrew(){
@@ -3424,11 +3699,13 @@ function notifyProductsFullyLoaded(){
     else updateCatalogResults(true);
   }
   else if(State.view==='admin'){
-    // Catalogo acabou de chegar por completo: bom momento para criar o indice
-    // leve (se ainda nao existir) e para gerar miniaturas dos produtos antigos,
-    // e para redesenhar as telas dependentes.
-    try{ DB._maybeBackfillIndex(); }catch(e){}
+    // Catalogo acabou de chegar por completo: bom momento para migrar as fotos
+    // base64 dos produtos antigos para o Storage (o documento cai para ~1 KB)
+    // e para criar o indice leve (se ainda nao existir). Os dois rodam em
+    // paralelo, em segundo plano, e redesenham as telas dependentes quando
+    // terminam. Visitantes so baixam documentos enxutos dali em diante.
     try{ DB._maybeBackfillThumbs(); }catch(e){}
+    try{ DB._maybeBackfillIndex(); }catch(e){}
     if(State.adminSection==='products'){
       try{ if(!syncAdminProducts()) renderAdminSection(); }catch(e){}
     }
@@ -3569,18 +3846,12 @@ function updateCatalogResults(keepPage){
     return;
   }
   var cw=document.getElementById('catalog-carousel-wrap');
-  // Novos destaques podem ter chegado depois do primeiro render (o catalogo e
-  // carregado em lotes no Firestore). Se o carrossel visivel nao mostra mais
-  // todos os destaques do catalogo, atualiza APENAS o carrossel - re-renderizar
-  // a pagina inteira aqui apagava e remontava os produtos ja visiveis, fazendo
-  // a tela inteira piscar a cada lote novo.
-  if(cw&&(cw.style.display!=='none')){
-    var featured=getCarouselHighlights();
-    if(featured.length!==cw.querySelectorAll('.carousel-slide').length){
-      cw.innerHTML=renderFeaturedCarousel(featured);
-      featInit();
-    }
-  }
+  // Novos destaques/highlights podem ter chegado depois do primeiro render (o
+  // catalogo e carregado em lotes no Firestore). Se o carrossel visivel nao
+  // mostra mais todos os itens, atualiza APENAS o carrossel - re-renderizar a
+  // pagina inteira aqui apagava e remontava os produtos ja visiveis, fazendo a
+  // tela inteira piscar a cada lote novo.
+  refreshCatalogCarousel();
   if(!keepPage) resetCatalogPagination();
 
   if(cw) cw.style.display=(filters.category||filters.search||filters.species||filters.brand)?'none':'block';
@@ -3636,7 +3907,7 @@ function updateCatalogResults(keepPage){
 function renderProductCard(p){
   return'<div data-pid="'+p.id+'" class="bg-white rounded-2xl shadow-sm border border-green-100 overflow-hidden hover:shadow-md hover:-translate-y-1 transition-all cursor-pointer group" onclick="navigate(\'product\',{productId:\''+p.id+'\'})">'+
     '<div class="relative overflow-hidden h-52 bg-white">'+
-      imgFrame(productCardImgSrc(p),p,0,cardImgOpts(p,{alt:p.name,hover:true,pad:'6%',lazy:true}))+
+      productCardImgHTML(p)+
       (p.featured?'<div class="absolute top-3 right-3 bg-green-500 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-star mr-1"></i>Destaque</div>':'')+
       (p.prescription?'<div class="absolute bottom-3 right-3 bg-amber-500/90 text-white text-xs font-bold px-2 py-1 rounded-lg"><i class="fas fa-prescription mr-1"></i>Receita</div>':'')+
       '<div class="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">'+
@@ -3866,6 +4137,11 @@ function renderProductDetail(id){
   const discount=p.originalPrice?Math.round((1-p.price/p.originalPrice)*100):0;
   const related=DB.products().filter(function(x){return x.active&&x.category===p.category&&x.id!==p.id}).slice(0,4);
   const mf=focalOf(p,0);
+  // Produto vindo do indice leve e cujo documento completo nao pode ser lido
+  // (ex.: conexao caiu) nao tem "images": usa as miniaturas e, sem nenhuma,
+  // mostra um marcador em vez de quebrar a pagina.
+  const gallery=(Array.isArray(p.images)&&p.images.length?p.images:(Array.isArray(p.thumbs)?p.thumbs:[])).slice(0,6);
+  const mainSrc=gallery[0]||'';
   return'<div class="max-w-7xl mx-auto px-4 py-6 md:py-10">'+
     '<nav class="text-xs md:text-sm text-gray-500 mb-4 md:mb-6 flex items-center gap-2 flex-wrap">'+
       (_appNavDepth>0?'<button onclick="goAppBack()" class="inline-flex items-center gap-1.5 hover:text-green-700 font-semibold"><i class="fas fa-arrow-left text-xs"></i>Voltar</button><i class="fas fa-chevron-right text-xs"></i>':'')+
@@ -3878,10 +4154,10 @@ function renderProductDetail(id){
     '<div class="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-12 mb-12 md:mb-16">'+
       '<div>'+
         '<div class="relative rounded-2xl overflow-hidden aspect-square mb-4 bg-white">'+
-          '<img id="main-img" src="'+p.images[0]+'" alt="'+p.name+'" style="'+(mf?'object-position:'+mf.x+'% '+mf.y+'%;':'padding:5%;')+'" class="'+(mf?'img-cover':'img-contain')+'">'+
+          (mainSrc?'<img id="main-img" src="'+mainSrc+'" alt="'+p.name+'" style="'+(mf?'object-position:'+mf.x+'% '+mf.y+'%;':'padding:5%;')+'" class="'+(mf?'img-cover':'img-contain')+'">':'<div class="w-full h-full flex items-center justify-center bg-green-50 text-green-200"><i class="fas fa-image text-6xl"></i></div>')+
         '</div>'+
         '<div class="flex gap-3" id="main-thumbs">'+
-          p.images.map(function(img,i){return '<button onclick="setMainImage(\''+p.id+'\','+i+')" class="w-20 h-20 rounded-xl overflow-hidden border-2 transition-colors bg-gray-100 '+(i===0?'border-green-500':'border-green-200')+'">'+
+          gallery.map(function(img,i){return '<button onclick="setMainImage(\''+p.id+'\','+i+')" class="w-20 h-20 rounded-xl overflow-hidden border-2 transition-colors bg-gray-100 '+(i===0?'border-green-500':'border-green-200')+'">'+
             thumbImg((p.thumbs&&p.thumbs[i])?p.thumbs[i]:img,p,i,'Foto '+(i+1),i>0)+
           '</button>'}).join('')+
         '</div>'+
@@ -3922,7 +4198,7 @@ function renderProductDetail(id){
 function adjustQty(d){const i=document.getElementById('qty-input');i.value=Math.max(1,+i.value+d)}
 function setMainImage(id,i){
   const p=DB.products().find(function(x){return x.id===id});
-  if(!p||!p.images[i]) return;
+  if(!p||!p.images||!p.images[i]) return;
   const src=p.images[i];
   const img=document.getElementById('main-img');
   const f=focalOf(p,i);
@@ -8209,7 +8485,13 @@ function refreshData(showToastOnError){
   var slowTimer=null;
   if(showToastOnError){
     slowTimer=setTimeout(function(){
-      showToast('Internet lenta... ainda carregando o catálogo.','warn');
+      slowTimer=null;
+      // Só avisa se a grade ainda estiver VAZIA: quando a vitrine inicial ja
+      // apareceu, a demora restante e invisivel para o usuario e o aviso so
+      // assusta ("site lento") sem necessidade.
+      var gridEmpty=false;
+      try{ gridEmpty=State.view==='catalog'&&getFilteredProducts().length===0; }catch(e){}
+      if(gridEmpty) showToast('Internet lenta... ainda carregando o catálogo.','warn');
     },8000);
   }
   var productId=State.view==='product'?State.productId:'';
