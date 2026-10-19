@@ -1,11 +1,12 @@
-const CACHE_NAME = 'agrovel-v8';
+const CACHE_NAME = 'agrovel-v9';
+// '/' e '/index.html' apontam para o mesmo arquivo: manter os dois duplicava
+// o download na instalacao do service worker. O logo.gif (810 KB) nao e usado
+// em nenhuma tela e tambem saiu do precache.
 const STATIC_ASSETS = [
-  '/',
   '/index.html',
   '/firebase-config.js',
   '/admin-config.js',
-  '/css/style.css',
-  '/img/logo.gif'
+  '/css/style.css'
 ];
 const STORAGE_HOSTS = ['firebasestorage.googleapis.com', 'storage.googleapis.com'];
 
@@ -21,8 +22,8 @@ function supportsMediaCache(url) {
   return url.hostname === 'cdnjs.cloudflare.com' || url.hostname === 'fonts.gstatic.com';
 }
 
-// Adiciona ao cache com timeout: em rede lenta um arquivo grande (ex.: logo.gif)
-// nao pode pendurar a instalacao do service worker para sempre.
+// Adiciona ao cache com timeout: em rede lenta um arquivo grande nao pode
+// pendurar a instalacao do service worker para sempre.
 function cacheAddTimed(cache, url, ms) {
   return Promise.race([
     cache.add(url).catch(function () {}),

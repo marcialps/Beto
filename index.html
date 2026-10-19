@@ -211,7 +211,7 @@
             <i class="fas fa-bars"></i>
           </button>
           <button onclick="navigate('catalog')" class="flex items-center gap-3 transition-all duration-300 hover:scale-105 p-2 rounded-2xl hover:bg-white/10 overflow-hidden">
-            <img src="img/logo.webp" alt="Agrovel" class="h-16 md:h-24 w-auto logo-glow" width="80" height="80" fetchpriority="high">
+            <img src="img/logo.webp" alt="Agrovel" class="h-16 md:h-24 w-auto logo-glow" width="380" height="200" fetchpriority="high">
           </button>
         </div>
         <nav class="hidden md:flex items-center gap-6 text-sm">
@@ -245,7 +245,7 @@
   <footer id="public-footer" class="bg-green-900 text-green-200 mt-16">
     <div class="max-w-7xl mx-auto px-4 py-8 md:py-12 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6 md:gap-8">
       <div>
-        <img src="img/logo.webp" alt="Agrovel" class="h-10 w-auto mb-3" width="40" height="40" loading="lazy">
+        <img src="img/logo.webp" alt="Agrovel" class="h-10 w-auto mb-3" width="380" height="200" loading="lazy">
         <p class="text-sm leading-relaxed"><strong class="text-white">Mais que Produtos, Soluções.</strong> Soluções inteligentes e completas para o seu campo e seus animais. Medicamentos, nutrição e tecnologia com garantia de procedência e padrão ouro de qualidade.</p>
       </div>
       <div>
@@ -569,6 +569,14 @@ const DB = (function(){
   // (relogio do servidor); ts = quando sincronizamos (para o resync periodico).
   let _cacheSync=null;
   let _idbSaveTimer=null;
+  // Gravacao no IndexedDB: nao pode reescrever os mesmos blocos a cada pagina
+  // da varredura. O intervalo minimo deixa a gravacao para o fim do lote.
+  const IDB_SAVE_MIN_MS=5000;
+  let _idbLastSaveTs=0;
+  // Throttle do localStorage: saveCache() e chamado dezenas de vezes durante o
+  // boot (promocoes, categorias, destaques, cada lote de produtos...).
+  let _cacheSaveTimer=null;
+  let _cacheSavePending=false;
 
   // --- Catalogo no IndexedDB em blocos (chunks) ---
   // O catalogo e salvo em blocos de IDB_CHUNK_SIZE produtos:
@@ -600,7 +608,7 @@ const DB = (function(){
     _idbMarkDirty(fromIdx===undefined?-1:fromIdx, toIdx);
   }
 
-  function saveCache(){
+  function _writeLocalCache(){
     try{
       var data={v:LOCAL_CACHE_VER,ts:Date.now()};
       CRITICAL_KEYS.forEach(function(k){ data[k]=mem[k]; });
@@ -609,15 +617,34 @@ const DB = (function(){
     }catch(e){}
     _scheduleIdbSave();
   }
-  function _scheduleIdbSave(){
+  // No maximo 1 gravacao por segundo, com uma gravacao final para nao perder o
+  // estado mais recente (o localStorage inteiro e reescrito a cada chamada).
+  function saveCache(){
+    if(_cacheSaveTimer){ _cacheSavePending=true; return; }
+    _writeLocalCache();
+    _cacheSaveTimer=setTimeout(function(){
+      _cacheSaveTimer=null;
+      if(_cacheSavePending){ _cacheSavePending=false; _writeLocalCache(); }
+    },1000);
+  }
+  function _scheduleIdbSave(delay){
     if(!_idbDirtyChunks||!_idbDirtyChunks.size) return;
     if(_idbSaveTimer) return;
-    _idbSaveTimer=setTimeout(function(){ _idbSaveTimer=null; _saveIdbCatalog(); },400);
+    var wait=delay;
+    if(wait===undefined){
+      wait=IDB_SAVE_MIN_MS-(Date.now()-_idbLastSaveTs);
+      if(wait<400) wait=400;
+    }
+    _idbSaveTimer=setTimeout(function(){ _idbSaveTimer=null; _saveIdbCatalog(); },wait);
   }
-  async function _saveIdbCatalog(){
+  async function _saveIdbCatalog(force){
     if(_idbSaveTimer){ clearTimeout(_idbSaveTimer); _idbSaveTimer=null; }
     if(_idbSaving) return; // a rodada em andamento re-agenda ao terminar
     if(!_idbDirtyChunks||!_idbDirtyChunks.size) return;
+    if(!force&&_idbLastSaveTs&&Date.now()-_idbLastSaveTs<IDB_SAVE_MIN_MS){
+      _scheduleIdbSave();
+      return;
+    }
     const list=Array.isArray(mem['products'])?mem['products']:[];
     const chunks=Math.ceil(list.length/IDB_CHUNK_SIZE);
     const dirty=_idbDirtyChunks; _idbDirtyChunks=null;
@@ -641,6 +668,7 @@ const DB = (function(){
       _idbMarkDirty(-1);
     }finally{
       _idbSaving=false;
+      _idbLastSaveTs=Date.now();
       if(_idbDirtyChunks&&_idbDirtyChunks.size) _scheduleIdbSave();
     }
   }
@@ -766,7 +794,7 @@ const DB = (function(){
   async function _fetchOne(key){
     try{
       const ref = docRef(key);
-      if(!ref){ mem[key]=defaultFor(key); return; }
+      if(!ref){ mem[key]=defaultFor(key); return false; }
       const snap = await _withRetry(function(){return ref.get();}, 'dados ('+key+')');
       const data = (snap.exists && snap.data()) ? snap.data() : {};
       if(data.v!==undefined){
@@ -774,9 +802,14 @@ const DB = (function(){
       } else {
         mem[key] = defaultFor(key);
       }
+      // "promos" restaurado do localStorage pode estar velho; a migracao de
+      // midia so pode rodar depois desta leitura do servidor.
+      if(key==='promos') mem['_promosFresh']=true;
+      return true;
     }catch(err){
       console.error('FB load '+key, err);
       mem[key] = defaultFor(key);
+      return false;
     }
   }
 
@@ -852,11 +885,45 @@ const DB = (function(){
     saveCache();
   }
 
+  // Dados "de tela": so sao baixados quando a tela que os usa e aberta.
+  // Antes, news (466 KB), orders e customers vinham em TODA visita, mesmo no
+  // catalogo. O checkout e o painel chamam _ensureData antes de usar.
+  const _dataJobs={};
+  const _dataStatus={}; // undefined | 'loading' | 'ok' | 'error'
+  // Carrega sob demanda e devolve true SOMENTE quando todas as chaves pedidas
+  // vieram do servidor com sucesso. Quem grava arrays inteiros (pedidos,
+  // clientes, noticias) deve esperar esse true antes de salvar.
+  function ensureData(keys){
+    const list=(Array.isArray(keys)?keys:[keys]).filter(function(k){return COLL.indexOf(k)>=0});
+    if(!fire.db) return Promise.resolve(list.every(function(k){return _dataStatus[k]==='ok';}));
+    const jobs=[];
+    list.forEach(function(k){
+      if(_dataStatus[k]==='ok') return;
+      if(!_dataJobs[k]){
+        _dataStatus[k]='loading';
+        _dataJobs[k]=_fetchOne(k).then(function(ok){
+          _dataStatus[k]=(ok===false)?'error':'ok';
+          delete _dataJobs[k];
+        });
+      }
+      jobs.push(_dataJobs[k]);
+    });
+    return Promise.all(jobs).then(function(){
+      return list.every(function(k){return _dataStatus[k]==='ok';});
+    });
+  }
+  function ensureNews(){
+    return ensureData('news').then(function(ok){
+      if(ok) mem['_newsReady']=true;
+      if(ok) saveCache();
+      return ok;
+    });
+  }
+
   async function loadBackground(){
-    const jobs = COLL.filter(function(k){return k!=='products'&&k!=='events'&&CRITICAL_KEYS.indexOf(k)===-1;}).map(_fetchOne);
-    jobs.push(loadEvents());
-    await Promise.all(jobs);
-    mem['_newsReady']=true;
+    // Somente eventos: eles alimentam o ranking "mais vistos" do catalogo.
+    // news/orders/customers sao carregados por _ensureData() na tela certa.
+    await loadEvents();
     saveCache();
   }
 
@@ -981,7 +1048,7 @@ const DB = (function(){
   // Tamanho do lote da paginacao do catalogo. Valor fixo: as fotos ja ficam
   // no Storage (o Firestore guarda apenas as URLs leves), entao o tamanho do
   // lote nao precisa mais ser ajustado em tempo real pela conexao.
-  const PRODUCTS_PAGE_SIZE = 200;
+  const PRODUCTS_PAGE_SIZE = 500;
   // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
   // carrossel abrir ja completo (ate 5 slides) em vez de 1/5 enquanto o
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
@@ -1092,10 +1159,16 @@ const DB = (function(){
       if(!fire.db) return;
       const ref = fire.db.collection('agrovel_data').doc('products_meta');
       const m = recomputeProductsMeta();
-      // merge:true preserva rev/updatedAt/deleted (revisao e tombstones usados
-      // pela sincronizacao incremental). Sem merge, cada cliente que terminava
-      // uma carga completa apagava esses campos.
-      ref.set({v:m},{merge:true}).catch(function(err){ console.error('FB write products_meta', err); });
+      // mergeFields (em vez de merge:true) para gravar apenas os contadores:
+      // um visitante que ainda nao sabe do indice NAO PODE apagar/regravar o
+      // idxTotal (era assim que uma sessao antiga voltava o indice para 928).
+      const fields=['v.total','v.active','v.cats','v.species','v.brands'];
+      const payload={total:m.total,active:m.active,cats:m.cats,species:m.species,brands:m.brands};
+      if(mem['_idxComplete']){
+        payload.idxTotal=m.total;
+        fields.push('v.idxTotal');
+      }
+      ref.set({v:payload},{mergeFields:fields}).catch(function(err){ console.error('FB write products_meta', err); });
     }catch(e){ console.error('FB write products_meta', e); }
   }
 
@@ -1218,6 +1291,7 @@ const DB = (function(){
         persistProductsMeta();
         _updateCacheSync();
         saveCache();
+        _saveIdbCatalog(true); // varredura concluida: grava os blocos finais
         startMetaListener();
         try{ if(typeof notifyProductsFullyLoaded==='function') notifyProductsFullyLoaded(); }catch(e){}
       }
@@ -1828,27 +1902,25 @@ const DB = (function(){
   // completo esta em memoria (docs completos) e o indice ainda nao existe.
   // Depois disso, visitantes baixam somente os documentos leves.
   let _backfillTried=false;
-  let _backfillScanned=false;
+  let _backfillRunning=false;
+  let _backfillLastAttempt=0;
   async function _maybeBackfillIndex(){
     try{
-      if(_backfillTried) return false;
+      if(_backfillTried||_backfillRunning) return false;
       if(!fire.db) return false;
       if(mem['_idxComplete']||_productsDirty) return false;
       if(!_productsComplete) return false;
-      if(_backfillScanned) return false;
-      _backfillScanned=true;
       var list=Array.isArray(mem['products'])?mem['products']:[];
       if(!list.length) return false;
       for(var i=0;i<list.length;i++){ if(list[i]&&list[i]._idx) return false; }
       var col=indexCol();
       if(!col) return false;
-      try{
-        var k='agrovel_idx_backfill';
-        var last=Number(localStorage.getItem(k))||0;
-        if(Date.now()-last<24*60*60*1000) return false;
-        localStorage.setItem(k,String(Date.now()));
-      }catch(e){}
-      _backfillTried=true;
+      // Uma tentativa por hora/sessao. O carimbo definitivo so e gravado APOS o
+      // sucesso: antes, uma falha de rede/permissao bloqueava novas tentativas
+      // por 24 h e o indice podia ficar incompleto para sempre.
+      if(Date.now()-_backfillLastAttempt<60*60*1000) return false;
+      _backfillLastAttempt=Date.now();
+      _backfillRunning=true;
       console.info('Agrovel: criando indice leve do catalogo ('+list.length+' produtos) em segundo plano...');
       const FV=firebase.firestore.FieldValue;
       for(var j=0;j<list.length;j+=450){
@@ -1861,9 +1933,17 @@ const DB = (function(){
       mem['_idxComplete']=true;
       if(mem['products_meta']) mem['products_meta'].idxTotal=list.length;
       try{ await fire.db.collection('agrovel_data').doc('products_meta').set({'v.idxTotal':list.length},{merge:true}); }catch(e){}
-      console.info('Agrovel: indice leve pronto.');
+      try{ localStorage.setItem('agrovel_idx_backfill',String(Date.now())); }catch(e){}
+      saveCache();
+      _backfillTried=true;
+      console.info('Agrovel: indice leve pronto ('+list.length+' produtos).');
       return true;
-    }catch(e){ console.error('FB backfill index',e); return false; }
+    }catch(e){
+      console.error('FB backfill index',e);
+      return false;
+    }finally{
+      _backfillRunning=false;
+    }
   }
 
   // --- Backfill de miniaturas (produtos antigos) ---
@@ -2276,9 +2356,12 @@ const DB = (function(){
     if(_productsDirty) flushProducts();
   }
   try{ window.addEventListener('beforeunload', flushAll); }catch(e){}
-  // Garante o catalogo no IndexedDB mesmo se o usuario fechar a aba antes do
-  // debounce do saveCache disparar.
-  try{ window.addEventListener('pagehide', function(){ _saveIdbCatalog(); }); }catch(e){}
+  // Garante o catalogo no IndexedDB e o cache local mesmo se o usuario fechar a
+  // aba antes do throttle/debounce disparar.
+  try{ window.addEventListener('pagehide', function(){
+    try{ if(_cacheSavePending){ _cacheSavePending=false; _writeLocalCache(); } }catch(e){}
+    _saveIdbCatalog(true);
+  }); }catch(e){}
 
   return {
     fire: fire,
@@ -2287,6 +2370,10 @@ const DB = (function(){
     _loadAll: loadAll,
     _loadCritical: function(onPromoReady,onStageReady){ return loadCritical(onPromoReady,onStageReady); },
     _loadBackground: function(){ return loadBackground(); },
+    _ensureData: function(keys){ return ensureData(keys); },
+    _ensureNews: function(){ return ensureNews(); },
+    dataLoaded: function(key){ return _dataStatus[key]==='ok'; },
+    dataFailed: function(key){ return _dataStatus[key]==='error'; },
     _startCatalog: function(){ return startCatalog(); },
     addProductView: function(id){ return _addProductView(id); },
     _loadProduct: function(id){ return loadProduct(id); },
@@ -2846,12 +2933,20 @@ function productCardImgHTML(p){
   if(!src) return '<div class="w-full h-full flex items-center justify-center bg-green-50 text-green-200"><i class="fas fa-image text-4xl"></i></div>';
   return imgFrame(src,p,0,cardImgOpts(p,{alt:p.name,hover:true,pad:'6%',lazy:true}));
 }
-// Imagem do slide de produto do carrossel: usa a foto completa quando o
-// documento tem; senao a miniatura; senao um marcador (produto do indice leve).
+// Imagem do slide de produto do carrossel: a miniatura (480px) vira o src
+// padrao e a foto grande so entra no srcset para telas grandes. Antes o slide
+// baixava a foto de ~900px em qualquer aparelho, inclusive no celular.
 function carouselProductImgHTML(p,i){
-  var src=(p&&p.images&&p.images[0])||productThumbURL(p)||'';
+  var thumb=productThumbURL(p);
+  var full=(p&&p.images&&p.images[0])||'';
+  var src=thumb||full||'';
   if(!src) return '<div class="w-full h-full flex items-center justify-center bg-green-50 text-green-200"><i class="fas fa-image text-5xl"></i></div>';
-  return imgFrame(src,p,0,{alt:p.name,hover:true,pad:'4%',fp:(i===0?'high':'low'),lazy:i>0});
+  var opts={alt:p.name,hover:true,pad:'4%',fp:(i===0?'high':'low'),lazy:i>0};
+  if(thumb&&full&&thumb!==full){
+    opts.srcset=thumb+' 480w, '+full+' 900w';
+    opts.sizes='(max-width: 768px) 100vw, 1100px';
+  }
+  return imgFrame(src,p,0,opts);
 }
 
 function getCarouselHighlights(){
@@ -4326,37 +4421,55 @@ function renderCheckout(){
   '</div>';
 }
 
+var _placingOrder=false;
 function placeOrder(e){
   e.preventDefault();
-  const f=new FormData(e.target);
-  const data=Object.fromEntries(f.entries());
-  const cart=DB.cart();
-  const subtotal=cart.reduce(function(s,x){return s+x.price*x.qty},0);
-  const shipping=subtotal>=300?0:20;
-  const customers=DB.customers();
-  let cust=customers.find(function(c){return c.email===data.email});
-  if(!cust){
-    cust={id:'c'+genId(),name:data.name,email:data.email,phone:data.phone,city:data.city,state:data.state,orders:[],totalSpent:0,createdAt:new Date().toISOString()};
-    customers.push(cust);
-  }
-  const orderId='o'+genId();
-  cust.orders.push(orderId);cust.totalSpent+=subtotal+shipping;
-  DB.setCustomers(customers);
-  const orders=DB.orders();
-  orders.unshift({
-    id:orderId,customerId:cust.id,customerName:data.name,
-    items:cart.map(function(x){return{productId:x.productId,name:x.name,qty:x.qty,price:x.price}}),
-    subtotal,shipping,total:subtotal+shipping,
-    status:'pendente',payment:data.payment,address:Object.assign({},data),
-    createdAt:new Date().toISOString()
+  if(_placingOrder) return;
+  var submitBtn=e.target.querySelector('button[type="submit"]');
+  if(submitBtn) submitBtn.disabled=true;
+  _placingOrder=true;
+  (async function(){
+    // orders/customers sao carregados sob demanda. Antes de gravar o pedido,
+    // garante que as listas existentes estao em memoria: o save substitui o
+    // array inteiro no Firestore e, sem isso, o pedido novo apagaria os antigos.
+    var dataOk=await DB._ensureData(['orders','customers']);
+    if(!dataOk){
+      showToast('N\u00e3o foi poss\u00edvel carregar os pedidos agora. Verifique a conex\u00e3o e tente novamente.','error');
+      return;
+    }
+    const f=new FormData(e.target);
+    const data=Object.fromEntries(f.entries());
+    const cart=DB.cart();
+    const subtotal=cart.reduce(function(s,x){return s+x.price*x.qty},0);
+    const shipping=subtotal>=300?0:20;
+    const customers=DB.customers();
+    let cust=customers.find(function(c){return c.email===data.email});
+    if(!cust){
+      cust={id:'c'+genId(),name:data.name,email:data.email,phone:data.phone,city:data.city,state:data.state,orders:[],totalSpent:0,createdAt:new Date().toISOString()};
+      customers.push(cust);
+    }
+    const orderId='o'+genId();
+    cust.orders.push(orderId);cust.totalSpent+=subtotal+shipping;
+    DB.setCustomers(customers);
+    const orders=DB.orders();
+    orders.unshift({
+      id:orderId,customerId:cust.id,customerName:data.name,
+      items:cart.map(function(x){return{productId:x.productId,name:x.name,qty:x.qty,price:x.price}}),
+      subtotal,shipping,total:subtotal+shipping,
+      status:'pendente',payment:data.payment,address:Object.assign({},data),
+      createdAt:new Date().toISOString()
+    });
+    DB.setOrders(orders);
+    const products=DB.products();
+    cart.forEach(function(item){const p=products.find(function(x){return x.id===item.productId});if(p)p.stock=Math.max(0,p.stock-item.qty)});
+    DB.setProducts(products);
+    DB.setCart([]);
+    renderCartBadge();
+    navigate('confirmation',{orderId});
+  })().catch(function(err){ console.error('FB place order',err); }).then(function(){
+    _placingOrder=false;
+    if(submitBtn) submitBtn.disabled=false;
   });
-  DB.setOrders(orders);
-  const products=DB.products();
-  cart.forEach(function(item){const p=products.find(function(x){return x.id===item.productId});if(p)p.stock=Math.max(0,p.stock-item.qty)});
-  DB.setProducts(products);
-  DB.setCart([]);
-  renderCartBadge();
-  navigate('confirmation',{orderId});
 }
 
 // ============================================================
@@ -4364,7 +4477,15 @@ function placeOrder(e){
 // ============================================================
 function renderConfirmation(orderId){
   const order=DB.orders().find(function(o){return o.id===orderId});
-  if(!order) return'<div class="text-center py-20"><button onclick="navigate(\'catalog\')" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar ao inicio</button></div>';
+  if(!order){
+    if(!DB.dataLoaded('orders')&&!DB.dataFailed('orders')){
+      DB._ensureData('orders').then(function(){
+        try{ if(State.view==='confirmation') render(); }catch(e){}
+      });
+      return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando pedido...</p></div></div>';
+    }
+    return'<div class="text-center py-20"><button onclick="navigate(\'catalog\')" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar ao inicio</button></div>';
+  }
   return'<div class="max-w-2xl mx-auto px-4 py-10 md:py-16 text-center fade-in">'+
     '<div class="w-20 h-20 md:w-24 md:h-24 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 md:mb-6 text-4xl md:text-5xl">&#9989;</div>'+
     '<h1 class="text-2xl md:text-3xl font-bold text-gray-900 mb-3">Pedido Confirmado!</h1>'+
@@ -4622,6 +4743,14 @@ function blogFeatured(n){
   '</div>';
 }
 function renderBlog(){
+  // O blog saiu do boot publico (item 4): o doc "news" (466 KB) so desce
+  // quando esta tela e aberta. Enquanto chega, mostra o carregamento.
+  if(!DB.newsReady()&&!DB.loadError()&&!DB.dataFailed('news')){
+    DB._ensureNews().then(function(){
+      try{ if(State.view==='blog') render(); }catch(e){}
+    });
+    return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando publica\u00e7\u00f5es...</p></div></div>';
+  }
   var all=(DB.news()||[]).filter(function(n){return n.active});
   var cats=[];
   all.forEach(function(n){if(n.category&&cats.indexOf(n.category)<0)cats.push(n.category)});
@@ -4726,11 +4855,16 @@ function updateBlogSearch(val){
 }
 function clearBlogFilters(){State.blogCategory='';State.blogSearch='';syncNavHash();render();}
 function renderBlogPost(id){
+  if(!DB.newsReady()&&!DB.loadError()&&!DB.dataFailed('news')){
+    DB._ensureNews().then(function(){
+      try{ if(State.view==='blog-post') render(); }catch(e){}
+    });
+  }
   var news=DB.news();
   var idx=news.findIndex(function(x){return x.id===id});
   var n=idx>=0?news[idx]:null;
   if(!n||!n.active){
-    if(!DB.newsReady()&&!DB.loadError()) return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando publica\u00e7\u00e3o...</p></div></div>';
+    if(!DB.newsReady()&&!DB.loadError()&&!DB.dataFailed('news')) return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="flex flex-col items-center justify-center gap-4"><i class="fas fa-spinner fa-spin text-4xl text-green-500"></i><p class="text-gray-500 font-medium">Carregando publica\u00e7\u00e3o...</p></div></div>';
     return '<div class="max-w-3xl mx-auto px-4 py-24 text-center fade-in"><div class="text-6xl mb-4">\ud83d\udced</div><h2 class="text-xl font-bold text-gray-700 mb-4">Publica\u00e7\u00e3o n\u00e3o encontrada</h2><button onclick="navigate(\'blog\')" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium">Voltar ao blog</button></div>';
   }
   if(!n.views)n.views=0;
@@ -5205,23 +5339,47 @@ function renderAdminSection(){
   // miniaturas dos produtos antigos. Guardado e silencioso.
   try{ DB._maybeBackfillIndex(); }catch(e){}
   try{ DB._maybeBackfillThumbs(); }catch(e){}
+  // Promocoes antigas com imagem em base64 engordavam o doc baixado por todos.
+  try{ _maybeMigratePromoMedia(); }catch(e){}
   // Fotos que ficaram presas no armazenamento local (idb:) sao reenviadas ao
   // Storage automaticamente neste aparelho (roda uma vez por minuto).
   try{ repairProductsMedia(); }catch(e){}
-  switch(State.adminSection){
-    case 'dashboard':el.innerHTML=renderDashboard();initDashboardCharts();break;
-    case 'products':el.innerHTML=renderAdminProducts();break;
-    case 'product-form':el.innerHTML=renderProductForm(State.editProductId);initProductImages(State.editProductId);break;
-    case 'orders':el.innerHTML=renderAdminOrders();break;
-    case 'customers':el.innerHTML=renderAdminCustomers();break;
-    case 'categories':el.innerHTML=renderAdminCategories();break;
-    case 'promos':el.innerHTML=renderAdminPromos();initPromoForm();resolveIdbMedia(el);break;
-    case 'highlights':el.innerHTML=renderAdminHighlights();initHighlightForm();resolveIdbMedia(el);break;
-    case 'copilot':el.innerHTML=renderCopilotPage();initCopilotChart();break;
-    case 'whatsapp':el.innerHTML=renderAdminWhatsApp();break;
-    case 'news':el.innerHTML=renderAdminNews();resolveIdbMedia(el);break;
-    case 'news-form':el.innerHTML=renderNewsForm(State.editNewsId);initNewsForm(State.editNewsId);resolveIdbMedia(el);break;
-    case 'testimonials':el.innerHTML=renderAdminTestimonials();break;
+  // Pedidos/clientes e noticias nao vem mais no boot publico: carrega o dado
+  // da tela aberta e redesenha quando ele chega (uma unica vez).
+  var _lazy=[];
+  if(State.adminSection==='dashboard'||State.adminSection==='orders'||State.adminSection==='customers'||State.adminSection==='copilot') _lazy=['orders','customers'];
+  else if(State.adminSection==='news'||State.adminSection==='news-form') _lazy=['news'];
+  var _lazyPending=false;
+  if(_lazy.length&&_lazy.some(function(k){return !DB.dataLoaded(k);})){
+    _lazyPending=true;
+    DB._ensureData(_lazy).then(function(loaded){
+      if(!loaded) return;
+      try{ if(document.getElementById('admin-content')) renderAdminSection(); }catch(e){}
+    });
+  }
+  if(_lazyPending){
+    // Evita desenhar o painel com listas vazias (divisoes por zero, "NaN%")
+    // enquanto orders/customers/news ainda estao chegando.
+    var _lazyFailed=_lazy.some(function(k){return DB.dataFailed(k);});
+    el.innerHTML=_lazyFailed
+      ? '<div class="p-4 md:p-8 fade-in"><div class="bg-white rounded-2xl border border-red-100 p-12 text-center text-gray-500"><i class="fas fa-triangle-exclamation text-3xl text-red-400 mb-3"></i><p class="font-medium">N\u00e3o foi poss\u00edvel carregar os dados agora.</p><button onclick="renderAdminSection()" class="mt-4 bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl text-sm font-medium">Tentar novamente</button></div></div>'
+      : '<div class="p-4 md:p-8 fade-in"><div class="bg-white rounded-2xl border border-green-100 p-12 text-center text-gray-500"><i class="fas fa-spinner fa-spin text-3xl text-green-500 mb-3"></i><p class="font-medium">Carregando dados...</p></div></div>';
+  }else{
+    switch(State.adminSection){
+      case 'dashboard':el.innerHTML=renderDashboard();initDashboardCharts();break;
+      case 'products':el.innerHTML=renderAdminProducts();break;
+      case 'product-form':el.innerHTML=renderProductForm(State.editProductId);initProductImages(State.editProductId);break;
+      case 'orders':el.innerHTML=renderAdminOrders();break;
+      case 'customers':el.innerHTML=renderAdminCustomers();break;
+      case 'categories':el.innerHTML=renderAdminCategories();break;
+      case 'promos':el.innerHTML=renderAdminPromos();initPromoForm();resolveIdbMedia(el);break;
+      case 'highlights':el.innerHTML=renderAdminHighlights();initHighlightForm();resolveIdbMedia(el);break;
+      case 'copilot':el.innerHTML=renderCopilotPage();initCopilotChart();break;
+      case 'whatsapp':el.innerHTML=renderAdminWhatsApp();break;
+      case 'news':el.innerHTML=renderAdminNews();resolveIdbMedia(el);break;
+      case 'news-form':el.innerHTML=renderNewsForm(State.editNewsId);initNewsForm(State.editNewsId);resolveIdbMedia(el);break;
+      case 'testimonials':el.innerHTML=renderAdminTestimonials();break;
+    }
   }
   document.querySelectorAll('.admin-link').forEach(function(el){
     const key=el.id?el.id.replace('nav-',''):'';
@@ -6229,7 +6387,9 @@ function handlePromoVideoFile(input){
   input.value='';
 }
 
-function savePromo(){
+var _savingPromo=false;
+async function savePromo(){
+  if(_savingPromo) return;
   var title=document.getElementById('promo-title').value.trim();
   if(!title){showToast('Informe o t\u00edtulo da promo\u00e7\u00e3o','warn');return}
   var text=document.getElementById('promo-text').value.trim();
@@ -6238,31 +6398,92 @@ function savePromo(){
   var image=_promoImage||imageurl||null;
   var active=document.getElementById('promo-active').checked;
   if(!image&&!video){showToast('Adicione uma imagem ou v\u00eddeo','warn');return}
-  var promos=DB.promos();
-  var editingId=State.editingPromo;
-  if(editingId){
-    var idx=promos.findIndex(function(x){return x.id===editingId});
-    if(idx>=0){
-      var old=promos[idx];
-      if(old.image!==(image||null)&&String(old.image||'').indexOf('idb:')===0)deleteMediaBlob(old.image);
-      if(old.video!==(video||null)&&String(old.video||'').indexOf('idb:')===0)deleteMediaBlob(old.video);
-      promos[idx]=Object.assign({},promos[idx],{title:title,text:text,video:video||null,image:image,active:active});
-      // desativa as demais
-      promos.forEach(function(x){if(x.id!==editingId)x.active=false});
+  _savingPromo=true;
+  try{
+    // Imagem em base64 dentro do documento "promos" engordava o doc baixado em
+    // TODA visita (chegou a ~380 KB). Sobe ao Storage e guarda so a URL.
+    var imgStr=String(image||'');
+    if(imgStr.indexOf('data:')===0||imgStr.indexOf('idb:')===0){
+      showToast('Enviando imagem, aguarde...','info');
+      var upUrl=await uploadProductImage(imgStr,'promocoes',null,'img/promocoes');
+      if(upUrl&&String(upUrl).indexOf('http')===0){
+        if(imgStr.indexOf('idb:')===0) deleteMediaBlob(imgStr);
+        image=upUrl;
+      }
     }
-  } else {
-    // ao criar nova ativa, desativa as demais
-    if(active) promos.forEach(function(x){x.active=false});
-    promos.unshift({id:'prm'+genId(),title:title,text:text,video:video||null,image:image,active:active,createdAt:new Date().toISOString()});
+    var promos=DB.promos();
+    var editingId=State.editingPromo;
+    if(editingId){
+      var idx=promos.findIndex(function(x){return x.id===editingId});
+      if(idx>=0){
+        var old=promos[idx];
+        if(old.image!==(image||null)&&String(old.image||'').indexOf('idb:')===0)deleteMediaBlob(old.image);
+        if(old.video!==(video||null)&&String(old.video||'').indexOf('idb:')===0)deleteMediaBlob(old.video);
+        promos[idx]=Object.assign({},promos[idx],{title:title,text:text,video:video||null,image:image,active:active});
+        // desativa as demais
+        promos.forEach(function(x){if(x.id!==editingId)x.active=false});
+      }
+    } else {
+      // ao criar nova ativa, desativa as demais
+      if(active) promos.forEach(function(x){x.active=false});
+      promos.unshift({id:'prm'+genId(),title:title,text:text,video:video||null,image:image,active:active,createdAt:new Date().toISOString()});
+    }
+    var saved=DB.setPromos(promos);
+    if(!saved) return;
+    showToast(editingId?'Promo\u00e7\u00e3o atualizada com sucesso!':'Promo\u00e7\u00e3o cadastrada com sucesso!');
+    State.editingPromo=null;
+    _promoImage=null;
+    _promoVideo=null;
+    renderAdminSection();
+    if(active) setTimeout(function(){showPromoPopup(true)},200);
+  }finally{
+    _savingPromo=false;
   }
-  var saved=DB.setPromos(promos);
-  if(!saved) return;
-  showToast(editingId?'Promo\u00e7\u00e3o atualizada com sucesso!':'Promo\u00e7\u00e3o cadastrada com sucesso!');
-  State.editingPromo=null;
-  _promoImage=null;
-  _promoVideo=null;
-  renderAdminSection();
-  if(active) setTimeout(function(){showPromoPopup(true)},200);
+}
+
+// Migracao unica das promocoes antigas: sobe para o Storage as imagens que
+// ainda estao em base64 (ou presas no IndexedDB local) e regrava o documento
+// com URLs leves. Roda somente no painel admin, uma vez por sessao.
+var _promoMediaMigrationTried=false;
+var _promoMediaMigrationRunning=false;
+async function _maybeMigratePromoMedia(){
+  if(_promoMediaMigrationTried||_promoMediaMigrationRunning) return false;
+  var u=null;
+  try{ u=DB.currentUser(); }catch(e){}
+  if(!u||u.role!=='admin') return false;
+  // Nunca rodar com o cache local de promocoes: espera a leitura do Firestore.
+  if(!DB.mem||!DB.mem['_promosFresh']) return false;
+  var promos=DB.promos();
+  if(!Array.isArray(promos)||!promos.length) return false; // ainda carregando
+  _promoMediaMigrationTried=true;
+  var todo=promos.filter(function(p){
+    var im=p&&p.image?String(p.image):'';
+    return im.indexOf('data:')===0||im.indexOf('idb:')===0;
+  });
+  if(!todo.length) return false;
+  _promoMediaMigrationRunning=true;
+  var changed=false;
+  try{
+    for(var i=0;i<todo.length;i++){
+      var before=String(todo[i].image||'');
+      var url=await uploadProductImage(before,'promocoes',null,'img/promocoes');
+      if(url&&String(url).indexOf('http')===0&&url!==before){
+        todo[i].image=url;
+        if(before.indexOf('idb:')===0) deleteMediaBlob(before);
+        changed=true;
+      }
+    }
+    if(changed){
+      DB.setPromos(promos);
+      saveCache();
+      console.info('Agrovel: imagens das promo\u00e7\u00f5es migradas para o Storage.');
+    }
+  }catch(e){
+    console.error('Agrovel migrar midia promocoes',e);
+  }finally{
+    _promoMediaMigrationRunning=false;
+  }
+  return changed;
 }
 
 function editPromo(id){
@@ -7364,7 +7585,7 @@ function idbRefToDataURL(ref,cb){
 // funcionando em TODOS os aparelhos (como nas versoes anteriores). Se o upload
 // terminar so depois do prazo, onLate(url) avisa para atualizar o produto com
 // a URL definitiva em segundo plano.
-async function uploadProductImage(src,folder,onLate){
+async function uploadProductImage(src,folder,onLate,basePath){
   src=String(src||'');
   if(src.indexOf('idb:')===0){
     var resolved=await new Promise(function(resolve){ idbRefToDataURL(src,resolve) });
@@ -7381,7 +7602,9 @@ async function uploadProductImage(src,folder,onLate){
       var m=src.match(/^data:image\/([a-zA-Z0-9.+-]+)/);
       var ext=(m&&m[1])?m[1].replace(/[^a-z0-9]/gi,'')||'jpg':'jpg';
       var name=('img'+Date.now()+'-'+Math.random().toString(36).slice(2,7)+'.'+ext);
-      var sr=firebase.storage().ref('img/produtos/'+folder+'/'+name);
+      // basePath permite reaproveitar o mesmo upload para pastas fora de
+      // img/produtos (ex.: img/promocoes).
+      var sr=firebase.storage().ref((basePath||('img/produtos/'+folder))+'/'+name);
       Promise.resolve(sr.putString(src,'data_url'))
         .then(function(){ return sr.getDownloadURL(); })
         .then(function(url){
@@ -8528,7 +8751,7 @@ window.addEventListener('DOMContentLoaded', async function(){
   initAuth();
   DB._loadBackground().then(function(){
     renderCategoryNavs();
-    if(State.view==='blog'||State.view==='blog-post'||State.view==='admin') render();
+    if(State.view==='blog'||State.view==='blog-post'||State.view==='admin'||State.view==='confirmation') render();
     // Eventos (product_view) chegaram: se o catalogo esta ordenado por "mais
     // visualizados", re-renderiza para aplicar o ranking real.
     else if(State.view==='catalog'&&(DB.filters()||{}).sort==='views') notifyProductsGrew();
