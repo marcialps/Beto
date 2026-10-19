@@ -978,36 +978,10 @@ const DB = (function(){
   // ordem de exibicao do catalogo: assim cada lote novo so acrescenta itens
   // no FIM da lista ja visivel e nada pula/muda de lugar na tela do usuario.
   const PRODUCTS_FIRST_BATCH = 15;
-  // Tamanho do lote da paginacao do catalogo, ajustado em tempo real (abordagem 2):
-  // em vez de confiar so no tipo de rede do aparelho, o app cronometra as
-  // consultas REAIS ao Firestore e adapta o lote ao que a conexao de verdade
-  // esta entregando. PADRAO: 250 (poucas idas ao servidor e primeira tela
-  // rapida); so reduz para 25 quando as paginas reais provam lentidao; so
-  // sobe para 500 quando varias paginas seguidas vierem muito rapidas.
-  const PRODUCTS_PAGE_SIZE_SLOW = 15;
-  const PRODUCTS_PAGE_SIZE_MEDIUM = 50;
-  const PRODUCTS_PAGE_SIZE_FAST = 200;
-  // Limiares por consulta paginada (ms), modelo fixo + proporcional:
-  //   rapida: tempo <= BASE_UP + PER_DOC_UP * limit
-  //   lenta : tempo >= BASE_DOWN + PER_DOC_DOWN * limit
-  // O custo fixo (ida/volta + indice) nao depende do tamanho do lote; o
-  // proporcional acompanha a transferencia dos documentos. Assim o mesmo
-  // limite vale para lotes de 25, 250 e 500.
-  const PRODUCTS_PAGE_UP_MS_BASE = 350;
-  const PRODUCTS_PAGE_UP_MS_PER_DOC = 2;
-  const PRODUCTS_PAGE_DOWN_MS_BASE = 1000;
-  const PRODUCTS_PAGE_DOWN_MS_PER_DOC = 8;
-  let PRODUCTS_PAGE_SIZE = 30;
-  // Anti-oscilacao: quantas consultas rapidas seguidas sao necessarias para
-  // aumentar o lote. Cresce a cada reducao (cap 8) para nao ficar alternando
-  // de tamanho em conexoes intermediarias.
-  let _pageFastStreak = 0;
-  let _pageUpNeeded = 2;
-  // Excedente da conexao fria: a PRIMEIRA consulta da sessao inclui DNS/TLS/
-  // canal e demora segundos mesmo em conexao boa. O valor fica guardado para
-  // descontar o mesmo excedente do primeiro lote real: era essa abertura que
-  // rebaixava o lote padrao (250) para 25 logo de cara em toda visita.
-  let _seedColdMs = 0;
+  // Tamanho do lote da paginacao do catalogo. Valor fixo: as fotos ja ficam
+  // no Storage (o Firestore guarda apenas as URLs leves), entao o tamanho do
+  // lote nao precisa mais ser ajustado em tempo real pela conexao.
+  const PRODUCTS_PAGE_SIZE = 200;
   // Vitrine de destaques: busca dedicada e paralela ao primeiro lote, para o
   // carrossel abrir ja completo (ate 5 slides) em vez de 1/5 enquanto o
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
@@ -1146,73 +1120,6 @@ const DB = (function(){
     }catch(e){ console.error('FB load products_meta', e); }
   }
 
-  // --- Ajuste do lote de produtos conforme a conexao medida (abordagem 2) ---
-  // Relogio da medicao: performance.now() tem sub-milissegundo e nao sofre com
-  // ajustes do relogio do sistema; Date.now() e fallback.
-  function _pageClock(){
-    try{ return (window.performance && performance.now) ? performance.now() : Date.now(); }catch(e){ return Date.now(); }
-  }
-
-  // Aplica o novo tamanho de lote (com log de diagnostico no console).
-  function _setProductsPageSize(next, ms){
-    if(next===PRODUCTS_PAGE_SIZE) return;
-    const prev=PRODUCTS_PAGE_SIZE;
-    PRODUCTS_PAGE_SIZE=next;
-    try{ console.info('Conexao: lote de produtos '+prev+' -> '+next+' (consulta em '+Math.round(ms)+' ms)'); }catch(e){}
-  }
-
-  // Limite rapido (ms) de uma consulta que trouxe `limit` produtos.
-  function _pageFastMs(limit){ return PRODUCTS_PAGE_UP_MS_BASE + PRODUCTS_PAGE_UP_MS_PER_DOC*limit; }
-  // Limite lento (ms) de uma consulta que trouxe `limit` produtos.
-  function _pageSlowMs(limit){ return PRODUCTS_PAGE_DOWN_MS_BASE + PRODUCTS_PAGE_DOWN_MS_PER_DOC*limit; }
-
-  // Mede uma consulta pequena de abertura (seed/destaques/mais vistos). NAO
-  // reduz o lote por si so: a primeira consulta da sessao inclui a montagem da
-  // conexao e demora mesmo em conexao boa - era isso que prendia o catalogo em
-  // 25. O valor fica guardado para perdoar o mesmo excedente de conexao fria
-  // na primeira pagina real (ver _recordPageTiming).
-  function _recordSeedTiming(ms){
-    if(typeof ms!=='number' || !isFinite(ms) || ms<0) return;
-    if(ms>_seedColdMs) _seedColdMs=ms;
-  }
-
-  // Mede uma pagina real do restante do catalogo e adapta o lote:
-  // - consulta acima do limite lento do lote: reduz um nivel na hora
-  //   (250 -> 25 quando a transferencia dos produtos esta ruim);
-  // - consultas abaixo do limite rapido, seguidas (_pageUpNeeded): sobe um
-  //   nivel (250 -> 500);
-  // - tempo intermediario: conexao "boa" para o tamanho atual; nao mexe.
-  // first=true desconta o excedente de conexao fria medido na abertura, para o
-  // primeiro lote nao ser punido pelo tempo de montagem da conexao.
-  function _recordPageTiming(ms, limit, first){
-    if(typeof ms!=='number' || !isFinite(ms) || ms<0) return;
-    if(typeof limit!=='number'||limit<=0) limit=PRODUCTS_PAGE_SIZE;
-    var cold=0;
-    if(first&&_seedColdMs>PRODUCTS_PAGE_UP_MS_BASE) cold=Math.min(_seedColdMs-PRODUCTS_PAGE_UP_MS_BASE, 2500);
-    const fastMs=_pageFastMs(limit)+cold;
-    const slowMs=_pageSlowMs(limit)+cold;
-    if(ms>slowMs){
-      _pageFastStreak=0;
-      const next=PRODUCTS_PAGE_SIZE===PRODUCTS_PAGE_SIZE_FAST?PRODUCTS_PAGE_SIZE_MEDIUM:PRODUCTS_PAGE_SIZE_SLOW;
-      if(next!==PRODUCTS_PAGE_SIZE){
-        _pageUpNeeded=Math.min(_pageUpNeeded+1, 8);
-        _setProductsPageSize(next, ms);
-      }
-      return;
-    }
-    if(ms<=fastMs){
-      _pageFastStreak++;
-      if(_pageFastStreak>=_pageUpNeeded){
-        _pageFastStreak=0;
-        const next=PRODUCTS_PAGE_SIZE===PRODUCTS_PAGE_SIZE_SLOW?PRODUCTS_PAGE_SIZE_MEDIUM
-                  :(PRODUCTS_PAGE_SIZE===PRODUCTS_PAGE_SIZE_MEDIUM?PRODUCTS_PAGE_SIZE_FAST:0);
-        if(next) _setProductsPageSize(next, ms);
-      }
-      return;
-    }
-    _pageFastStreak=0;
-  }
-
   // Valida o progresso persistido para retomar a varredura sequencial: so vale
   // com a MESMA revisao (nada mudou antes do cursor), mesma ordenacao e cache
   // local ainda incompleto. Caso contrario, varre do inicio (seguro).
@@ -1266,7 +1173,6 @@ const DB = (function(){
     try{
       var last = startAfterDoc || null;
       var resume = (!last && resumeCursor) ? resumeCursor : null;
-      var firstTiming = true;
       while(true){
         if(_productsLoadGen!==gen) return;
         const limit = PRODUCTS_PAGE_SIZE;
@@ -1283,7 +1189,6 @@ const DB = (function(){
             : (last ? col.orderBy(firebase.firestore.FieldPath.documentId()).startAfter(last).limit(limit) : col.orderBy(firebase.firestore.FieldPath.documentId()).limit(limit));
         }
         var snap;
-        const _t0 = _pageClock();
         try{
           snap = await _withRetry(function(){return q.get();}, 'catalogo');
         }catch(err){
@@ -1295,8 +1200,6 @@ const DB = (function(){
           }
           throw err;
         }
-        _recordPageTiming(_pageClock() - _t0, limit, firstTiming);
-        firstTiming = false;
         if(_productsLoadGen!==gen) return;
         if(snap.empty) break;
         appendProducts(snap.docs.map(function(d){return d.data()}));
@@ -1597,9 +1500,7 @@ const DB = (function(){
     const tgen=++_topViewedGen;
     try{
       const col=_catalogReadCol();
-      var _t0=_pageClock();
       var snap=await _withRetry(function(){return col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos');
-      _recordSeedTiming(_pageClock()-_t0);
       if(_topViewedGen!==tgen) return false;
       var list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
       if(list.length){
@@ -1688,9 +1589,7 @@ const DB = (function(){
 
       if(!hasSeed){
         // Sem seed (ranking vazio/caminho admin): primeiro lote alfabetico.
-        var _t0=_pageClock();
         var first = await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();}, 'primeiros produtos');
-        _recordSeedTiming(_pageClock() - _t0);
         if(first.empty){
           // Salvaguarda: documento sem o campo "name" nao entra na ordenacao
           // por nome. Se nenhum veio, varre o catalogo por documentId.
@@ -1764,9 +1663,7 @@ const DB = (function(){
     if(!fire.db) return { list: [], startAfterDoc: null, byName: true };
     const col = _catalogReadCol();
     try{
-      var _t0=_pageClock();
       var first = await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_FIRST_BATCH).get();}, 'primeiros produtos');
-      _recordSeedTiming(_pageClock()-_t0);
       var byName = true;
       if(first.empty){
         first = await _withRetry(function(){return col.orderBy(firebase.firestore.FieldPath.documentId()).limit(PRODUCTS_FIRST_BATCH).get();}, 'primeiros produtos');
