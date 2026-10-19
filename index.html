@@ -984,9 +984,9 @@ const DB = (function(){
   // esta entregando. PADRAO: 250 (poucas idas ao servidor e primeira tela
   // rapida); so reduz para 25 quando as paginas reais provam lentidao; so
   // sobe para 500 quando varias paginas seguidas vierem muito rapidas.
-  const PRODUCTS_PAGE_SIZE_SLOW = 100;
-  const PRODUCTS_PAGE_SIZE_MEDIUM = 250;
-  const PRODUCTS_PAGE_SIZE_FAST = 500;
+  const PRODUCTS_PAGE_SIZE_SLOW = 15;
+  const PRODUCTS_PAGE_SIZE_MEDIUM = 50;
+  const PRODUCTS_PAGE_SIZE_FAST = 200;
   // Limiares por consulta paginada (ms), modelo fixo + proporcional:
   //   rapida: tempo <= BASE_UP + PER_DOC_UP * limit
   //   lenta : tempo >= BASE_DOWN + PER_DOC_DOWN * limit
