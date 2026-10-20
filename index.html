@@ -50,12 +50,23 @@
   .whatsapp-float:hover{transform:scale(1.1);box-shadow:0 6px 24px rgba(37,211,102,.5)}
   .logo-glow{filter:drop-shadow(0 2px 6px rgba(0,0,0,.3));transition:all .3s ease}
   .logo-glow:hover{filter:drop-shadow(0 4px 14px rgba(0,0,0,.45));transform:scale(1.18)}
-  /* Search Autocomplete */
-  #search-autocomplete{max-height:360px;overflow-y:auto}
-  #search-autocomplete button:first-child{border-top:none}
-  #search-autocomplete button:focus{background:#f0fdf4;outline:none}
-  #search-autocomplete mark{padding:0 2px;border-radius:2px}
-  #search-autocomplete img{border-radius:6px}
+  /* Busca global: sempre visivel no cabecalho (desktop e mobile) */
+  #global-search-wrap{padding-bottom:10px}
+  #global-search-box{position:relative;max-width:44rem;margin:0 auto}
+  #global-search-input{width:100%;padding:8px 44px 8px 42px;border-radius:9999px;border:1px solid rgba(134,239,172,.32);background:rgba(255,255,255,.12);color:#fff;font-size:1rem;outline:none;transition:background .2s,border-color .2s,box-shadow .2s}
+  #global-search-input::placeholder{color:rgba(187,247,208,.75)}
+  #global-search-input:focus{background:rgba(255,255,255,.2);border-color:rgba(187,247,208,.7);box-shadow:0 0 0 3px rgba(134,239,172,.18)}
+  #global-search-icon{position:absolute;left:16px;top:50%;transform:translateY(-50%);color:rgba(187,247,208,.85);font-size:.85rem;pointer-events:none}
+  #global-search-clear{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:28px;height:28px;border-radius:9999px;display:none;align-items:center;justify-content:center;border:none;background:transparent;color:rgba(187,247,208,.9);cursor:pointer;transition:background .2s,color .2s}
+  #global-search-clear:hover{background:rgba(255,255,255,.18);color:#fff}
+  #global-search-autocomplete{max-height:min(62vh,360px);overflow-y:auto}
+  #global-search-autocomplete button:first-child{border-top:none}
+  #global-search-autocomplete button:focus{background:#f0fdf4;outline:none}
+  #global-search-autocomplete mark{padding:0 2px;border-radius:2px}
+  #global-search-autocomplete img{border-radius:6px}
+  .gs-all-results{justify-content:center;font-size:.8rem;font-weight:600;color:#15803d;gap:8px}
+  .gs-no-results{padding:12px 16px;font-size:.85rem;color:#6b7280}
+  @media(min-width:769px){#global-search-wrap{padding-bottom:16px}}
   .carousel{position:relative;overflow:hidden}
   .carousel-track{display:flex;transition:transform .6s cubic-bezier(.65,0,.35,1)}
   .carousel-slide{flex:0 0 100%;min-width:100%}
@@ -205,13 +216,13 @@
   <!-- HEADER (public) -->
   <header id="public-header" class="bg-green-900 text-white shadow-lg sticky top-0 z-30">
     <div class="max-w-7xl mx-auto px-4">
-      <div class="flex items-center justify-between h-20 md:h-36">
+      <div class="flex items-center justify-between h-20 md:h-28">
         <div class="flex items-center gap-3">
           <button onclick="toggleMobileMenu()" class="md:hidden text-white text-xl p-2 rounded-lg hover:bg-white/10 transition-colors" aria-label="Menu">
             <i class="fas fa-bars"></i>
           </button>
           <button onclick="navigate('catalog')" class="flex items-center gap-3 transition-all duration-300 hover:scale-105 p-2 rounded-2xl hover:bg-white/10 overflow-hidden">
-            <img src="img/logo.webp" alt="Agrovel" class="h-16 md:h-24 w-auto logo-glow" width="380" height="200" fetchpriority="high">
+            <img src="img/logo.webp" alt="Agrovel" class="h-16 md:h-20 w-auto logo-glow" width="380" height="200" fetchpriority="high">
           </button>
         </div>
         <nav class="hidden md:flex items-center gap-6 text-sm">
@@ -227,6 +238,19 @@
           </button>
           <div id="user-menu" class="flex items-center gap-2"></div>
         </div>
+      </div>
+      <!-- BUSCA GLOBAL: campo sempre visivel, desktop e smartphone -->
+      <div id="global-search-wrap">
+        <form id="global-search-box" role="search" onsubmit="event.preventDefault();globalSearchSubmit();">
+          <i id="global-search-icon" class="fas fa-search" aria-hidden="true"></i>
+          <input id="global-search-input" type="text" placeholder="Buscar produtos na Agrovel..." enterkeyhint="search" autocomplete="off"
+                 aria-label="Buscar produtos na Agrovel" oninput="onGlobalSearchInput(this.value)"
+                 onkeydown="handleGlobalSearchKeydown(event)" onfocus="onGlobalSearchInput(this.value)">
+          <button id="global-search-clear" type="button" onclick="clearGlobalSearch()" title="Limpar busca" aria-label="Limpar busca">
+            <i class="fas fa-times"></i>
+          </button>
+          <div id="global-search-autocomplete" class="absolute z-50 w-full mt-1 bg-white border border-green-200 rounded-xl shadow-lg hidden overflow-hidden"></div>
+        </form>
       </div>
       <div id="mobile-menu" class="md:hidden">
         <button onclick="navigate('blog')" class="w-full text-left px-4 py-3 text-sm font-semibold text-green-100 bg-green-800/60 hover:bg-green-700 rounded-lg transition-colors mb-1 mobile-highlight"><i class="fas fa-newspaper mr-2 text-green-400"></i>AGROVEL Informa</button>
@@ -2809,6 +2833,9 @@ function render(){
     case 'admin':mc.innerHTML=renderAdmin();renderAdminSection();break;
     default:mc.innerHTML=renderCatalog();featInit();
   }
+  // Mantem a busca do cabecalho em sincronia com o filtro do catalogo
+  // (link direto com #q=, limpar filtros, etc.) sem atrapalhar quem digita.
+  if(State.view==='catalog') setGlobalSearchValue(DB.filters().search||'');
 }
 
 function renderUserMenu(){
@@ -3320,6 +3347,27 @@ function resultCount(filtered){
   return filtered.length;
 }
 
+// Normaliza texto para busca: minusculas e sem acentos, para que "racao"
+// encontre "Ração" e vice-versa. Vale tanto para o texto dos produtos quanto
+// para os termos digitados pelo usuario.
+function foldSearchText(value){
+  var s=String(value==null?'':value).toLowerCase();
+  return s.normalize?s.normalize('NFD').replace(/[\u0300-\u036f]/g,''):s;
+}
+
+// Divide a busca em termos independentes: "racao filhote" vira
+// ["racao","filhote"]. A ordem nao importa e cada termo pode estar em
+// qualquer campo do produto (nome, descricao, categoria, marca etc.).
+function searchTermsOf(query){
+  var parts=foldSearchText(query).split(/\s+/);
+  var terms=[];
+  for(var i=0;i<parts.length;i++){
+    var term=parts[i];
+    if(term&&terms.indexOf(term)<0) terms.push(term);
+  }
+  return terms;
+}
+
 // Texto de busca pre-computado por produto (WeakMap): evita remontar a
 // "haystack" de 12 mil produtos a cada tecla digitada ou filtro aplicado.
 // O objeto do produto e a chave: quando um produto e substituido (delta/edicao),
@@ -3329,9 +3377,21 @@ function searchTextOf(p){
   if(!p) return '';
   var cached=_productSearchText.get(p);
   if(cached!==undefined) return cached;
-  var t=[p.name,p.description,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' '),(p.tagsText||'')].join(' ').toLowerCase();
+  var t=foldSearchText([p.name,p.description,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' '),(p.tagsText||'')].join(' '));
   _productSearchText.set(p,t);
   return t;
+}
+
+// Verdadeiro quando TODOS os termos aparecem no texto do produto, em
+// qualquer posicao/ordem. Ex.: "racao filhote" encontra "Racao Dog Filhote"
+// e "Racao Gato Filhote".
+function productMatchesSearch(p,terms){
+  if(!terms||!terms.length) return true;
+  var text=searchTextOf(p);
+  for(var i=0;i<terms.length;i++){
+    if(text.indexOf(terms[i])<0) return false;
+  }
+  return true;
 }
 
 // Contagem REAL de visualizacoes por produto, derivada dos eventos de
@@ -3384,10 +3444,8 @@ function getFilteredProducts(force){
   if(filters.species) filtered=filtered.filter(function(p){return p.species===filters.species});
   if(filters.brand) filtered=filtered.filter(function(p){return p.brand===filters.brand});
   if(filters.search){
-    const term=filters.search.toLowerCase();
-    filtered=filtered.filter(function(p){
-      return searchTextOf(p).indexOf(term)>=0;
-    });
+    const terms=searchTermsOf(filters.search);
+    filtered=filtered.filter(function(p){return productMatchesSearch(p,terms)});
   }
   // Padrao: MAIS VISUALIZADOS. Usa a contagem real dos eventos product_view
   // (campo "views" como fallback), com desempate alfabetico. Quando nao ha
@@ -3733,6 +3791,14 @@ function notifyProductsMetaLoaded(){
   }
 }
 
+// Chips dos filtros ativos (categoria/especie/marca). A busca nao entra como
+// chip: o texto pesquisado fica visivel no campo do cabecalho.
+function catalogActiveChipsHTML(filters){
+  return (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
+    (filters.species?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-paw text-xs"></i>'+filters.species+'<button onclick="toggleSpecies(\''+filters.species+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
+    (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'');
+}
+
 function renderCatalog(){
   const filters=DB.filters();
   const products=DB.products().filter(function(p){return p.active});
@@ -3741,6 +3807,7 @@ function renderCatalog(){
   resetCatalogPagination();
 
   const featured=getCarouselHighlights();
+  const chips=catalogActiveChipsHTML(filters);
 
   return'<div>'+
   (DB.loadError()&&(!products.length||!DB.productsComplete())?'<div class="max-w-7xl mx-auto px-4 pt-6">'+
@@ -3752,48 +3819,34 @@ function renderCatalog(){
   '<div id="catalog-carousel-wrap" style="display:'+(filters.category||filters.search||filters.species||filters.brand?'none':'block')+'">'+renderFeaturedCarousel(featured)+'</div>'+
 
   '<section id="catalog-section" class="max-w-7xl mx-auto px-4 py-10">'+
-    '<div class="flex flex-col md:flex-row gap-4 mb-6">'+
-      '<div class="relative flex-1">'+
-        '<i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"></i>'+
-        '<input id="search-input" type="text" placeholder="Buscar na Agrovel..." value="'+(filters.search||'')+'"'+
-          ' class="w-full pl-11 pr-10 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 focus:ring-2 focus:ring-green-200 outline-none transition-all"'+
-          ' oninput="updateSearch(this.value)" onkeydown="handleSearchKeydown(event)" autocomplete="off">'+
-        '<button id="search-clear" onclick="clearSearch()" title="Limpar busca" style="display:'+(filters.search?'flex':'none')+'"'+
-          ' class="absolute right-3 top-1/2 -translate-y-1/2 w-6 h-6 items-center justify-center rounded-full hover:bg-gray-100 transition-colors">'+
-          '<i class="fas fa-times text-gray-400 text-xs"></i>'+
-        '</button>'+
-        '<div id="search-autocomplete" class="absolute z-50 w-full mt-1 bg-white border border-green-200 rounded-xl shadow-lg hidden overflow-hidden"></div>'+
-      '</div>'+
-      '<select id="sort-select" onchange="updateSort(this.value)"'+
-        ' class="px-4 py-3 rounded-xl border border-green-200 bg-white focus:border-green-500 outline-none cursor-pointer">'+
-        '<option value="views" '+(filters.sort==='views'?'selected':'')+'>Mais visualizados</option>'+
-        '<option value="alpha" '+(filters.sort==='alpha'?'selected':'')+'>Ordem Alfab&eacute;tica</option>'+
-        '<option value="featured" '+(filters.sort==='featured'?'selected':'')+'>Destaques</option>'+
-        '<option value="newest" '+(filters.sort==='newest'?'selected':'')+'>Mais Recentes</option>'+
-        //'<option value="rating" '+(filters.sort==='rating'?'selected':'')+'>Mais Avaliados</option>'+
-      '</select>'+
-    '</div>'+
-
     '<div class="flex flex-col lg:flex-row gap-8">'+
       '<aside id="catalog-filters-aside" class="lg:w-64 flex-shrink-0'+(filters.search?' hidden lg:block':'')+'">'+
         catalogFilterAsideHTML(products,filters)+
       '</aside>'+
 
-      '<div id="catalog-grid-area" class="flex-1">'+
-        ((filters.category||filters.species||filters.brand||filters.search)?'<div class="flex items-center flex-wrap gap-2 mb-5">'+
-          (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
-          (filters.species?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-paw text-xs"></i>'+filters.species+'<button onclick="toggleSpecies(\''+filters.species+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
-          (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
-        '</div>':'')+
+      '<div class="flex-1 min-w-0">'+
+        '<div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-5">'+
+          '<div class="min-w-0 flex-1">'+
+            '<div id="catalog-active-chips" class="items-center flex-wrap gap-2 mb-2" style="display:'+(chips?'flex':'none')+'">'+chips+'</div>'+
+            '<p id="catalog-results-count" class="text-sm text-gray-500">'+catalogCountTextHTML(filtered)+'</p>'+
+          '</div>'+
+          '<select id="sort-select" onchange="updateSort(this.value)"'+
+            ' class="px-4 py-2.5 rounded-xl border border-green-200 bg-white focus:border-green-500 outline-none cursor-pointer text-sm">'+
+            '<option value="views" '+(filters.sort==='views'?'selected':'')+'>Mais visualizados</option>'+
+            '<option value="alpha" '+(filters.sort==='alpha'?'selected':'')+'>Ordem Alfab&eacute;tica</option>'+
+            '<option value="featured" '+(filters.sort==='featured'?'selected':'')+'>Destaques</option>'+
+            '<option value="newest" '+(filters.sort==='newest'?'selected':'')+'>Mais Recentes</option>'+
+          '</select>'+
+        '</div>'+
 
-        '<p id="catalog-results-count" class="text-sm text-gray-500 mb-5">'+catalogCountTextHTML(filtered)+'</p>'+
-
-        (filtered.length===0?(catalogLoaderDue()?loadingCatalogLogoHTML():(catalogIsBooting()?'':'<div class="text-center py-20">'+
-          '<div class="text-6xl mb-4">🔍</div>'+
-          '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
-          '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
-          '<button onclick="clearFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button>'+
-        '</div>')):renderCatalogGrid(filtered))+
+        '<div id="catalog-grid-area">'+
+          (filtered.length===0?(catalogLoaderDue()?loadingCatalogLogoHTML():(catalogIsBooting()?'':'<div class="text-center py-20">'+
+            '<div class="text-6xl mb-4">🔍</div>'+
+            '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
+            '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
+            '<button onclick="clearFilters()" class="bg-green-600 text-white px-6 py-3 rounded-xl font-medium hover:bg-green-700 transition-colors">Limpar Filtros</button>'+
+          '</div>')):renderCatalogGrid(filtered))+
+        '</div>'+
       '</div>'+
     '</div>'+
   '</section>'+
@@ -3848,6 +3901,15 @@ function updateCatalogResults(keepPage){
 
   if(cw) cw.style.display=(filters.category||filters.search||filters.species||filters.brand)?'none':'block';
 
+  // Chips de filtros ficam fora da grade (nao sao remontados junto com os
+  // cards); atualiza apenas o conteudo deles.
+  var chipsEl=document.getElementById('catalog-active-chips');
+  if(chipsEl){
+    var chipsHTML=catalogActiveChipsHTML(filters);
+    if(chipsEl.innerHTML!==chipsHTML) chipsEl.innerHTML=chipsHTML;
+    chipsEl.style.display=chipsHTML?'flex':'none';
+  }
+
   // Cabecalho "Mais visualizados" da carga inicial: some sozinho quando o
   // catalogo termina de chegar, sem precisar remontar a area inteira.
   try{
@@ -3855,8 +3917,8 @@ function updateCatalogResults(keepPage){
     var seedEl=document.getElementById('catalog-seed-header');
     if(seedEl&&!seedWanted) seedEl.parentNode.removeChild(seedEl);
     else if(!seedEl&&seedWanted){
-      var seedCnt=document.getElementById('catalog-results-count');
-      if(seedCnt) seedCnt.insertAdjacentHTML('beforebegin',seedWanted);
+      var seedAnchor=document.getElementById('catalog-grid-area');
+      if(seedAnchor) seedAnchor.insertAdjacentHTML('beforebegin',seedWanted);
     }
   }catch(e){}
 
@@ -3874,12 +3936,7 @@ function updateCatalogResults(keepPage){
   if(existingCount){
     existingCount.innerHTML=catalogCountTextHTML(filtered);
   }
-  var html=((filters.category||filters.species||filters.brand||filters.search)?'<div class="flex items-center flex-wrap gap-2 mb-5">'+
-    (filters.category?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.category+'<button onclick="toggleCategory(\''+filters.category+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
-    (filters.species?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-paw text-xs"></i>'+filters.species+'<button onclick="toggleSpecies(\''+filters.species+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
-    (filters.brand?'<span class="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-1.5"><i class="fas fa-tag text-xs"></i>'+filters.brand+'<button onclick="toggleBrand(\''+filters.brand+'\')" class="ml-1 hover:text-green-900">&times;</button></span>':'')+
-  '</div>':'')+
-  (filtered.length===0?(catalogLoaderDue()?loadingCatalogLogoHTML():(catalogIsBooting()?'':'<div class="text-center py-20">'+
+  var html=(filtered.length===0?(catalogLoaderDue()?loadingCatalogLogoHTML():(catalogIsBooting()?'':'<div class="text-center py-20">'+
     '<div class="text-6xl mb-4">🔍</div>'+
     '<h3 class="text-xl font-bold text-gray-600 mb-2">Nenhum produto encontrado</h3>'+
     '<p class="text-gray-400 mb-6">Tente ajustar os filtros ou a busca.</p>'+
@@ -3926,41 +3983,30 @@ function renderProductCard(p){
   '</div>';
 }
 
-function clearSearch(){
-  const input=document.getElementById('search-input');
-  if(input) input.value='';
-  hideSearchAutocomplete();
-  updateSearch('');
-  if(document.getElementById('search-input'))document.getElementById('search-input').focus();
-}
+// ============================================================
+// BUSCA GLOBAL (campo sempre visivel no cabecalho)
+// Digitar mostra sugestoes; Enter (sem sugestao destacada) abre o
+// catalogo ja filtrado; Esc fecha e sai do campo. Funciona de
+// qualquer tela do site, inclusive blog, sobre e detalhe do produto.
+// ============================================================
 
-function showSearchAutocomplete(val){
-  const input=document.getElementById('search-input');
-  const dropdown=document.getElementById('search-autocomplete');
-  if(!input||!dropdown) return;
-  
-  const term=val.toLowerCase().trim();
-  if(term.length<2){
-    hideSearchAutocomplete();
-    return;
-  }
-  
-  // Busca usa o texto pre-computado por produto (searchTextOf) e para na 8a
-  // ocorrencia, em vez de filtrar os 12 mil produtos a cada tecla.
+// Sugestoes: usa o texto pre-computado por produto (searchTextOf) e para na 8a
+// ocorrencia, em vez de filtrar os 12 mil produtos a cada tecla. Os termos sao
+// independentes: todos precisam aparecer, em qualquer ordem.
+function searchAutocompleteMatches(term){
+  const terms=searchTermsOf(term);
   const products=DB.products();
   const matches=[];
   for(let i=0;i<products.length&&matches.length<8;i++){
     const p=products[i];
     if(!p||!p.active) continue;
-    if(searchTextOf(p).indexOf(term)>=0) matches.push(p);
+    if(productMatchesSearch(p,terms)) matches.push(p);
   }
-  
-  if(matches.length===0){
-    hideSearchAutocomplete();
-    return;
-  }
-  
-  dropdown.innerHTML=matches.map(function(p){
+  return matches;
+}
+
+function searchAutocompleteHTML(matches,term){
+  return matches.map(function(p){
     return '<button type="button" onclick="selectAutocompleteProduct(\''+p.id+'\')" '+
       'class="w-full px-4 py-3 text-left hover:bg-green-50 transition-colors flex items-center gap-3 border-t border-green-100">'+
       '<div class="w-10 h-10 rounded-lg bg-green-50 flex items-center justify-center overflow-hidden flex-shrink-0">'+
@@ -3976,95 +4022,180 @@ function showSearchAutocomplete(val){
       '</div>'+
       '<i class="fas fa-chevron-right text-gray-300 text-sm"></i>'+
     '</button>';
-  }).join('');
-  
+  }).join('')+
+  '<button type="button" onclick="globalSearchSubmit()" class="w-full px-4 py-3 text-left hover:bg-green-50 transition-colors flex items-center gap-3 border-t border-green-100 gs-all-results"><i class="fas fa-list-ul"></i> Ver todos os resultados</button>';
+}
+
+function showSearchAutocomplete(val){
+  const input=document.getElementById('global-search-input');
+  const dropdown=document.getElementById('global-search-autocomplete');
+  if(!input||!dropdown) return;
+
+  const term=val.trim();
+  if(term.length<2){
+    hideSearchAutocomplete();
+    return;
+  }
+
+  const matches=searchAutocompleteMatches(term);
+  dropdown.innerHTML=matches.length
+    ? searchAutocompleteHTML(matches,term)
+    : '<div class="gs-no-results">Nenhum produto encontrado para &ldquo;'+esc(val.trim())+'&rdquo;.</div>'+
+      '<button type="button" onclick="globalSearchSubmit()" class="w-full px-4 py-3 text-left hover:bg-green-50 transition-colors flex items-center gap-3 border-t border-green-100 gs-all-results"><i class="fas fa-list-ul"></i> Ver todos os resultados</button>';
+
   dropdown.classList.remove('hidden');
 }
 
 function hideSearchAutocomplete(){
-  const dropdown=document.getElementById('search-autocomplete');
+  const dropdown=document.getElementById('global-search-autocomplete');
   if(dropdown) dropdown.classList.add('hidden');
 }
 
-function highlightMatch(text,term){
-  if(!term) return text;
-  const regex=new RegExp('('+term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','gi');
-  return text.replace(regex,'<mark class="bg-amber-200 text-amber-900">$1</mark>');
+// Destaca no nome do produto todos os termos digitados, sem exigir que
+// estejam juntos e ignorando acentos/maiusculas.
+function highlightMatch(text,query){
+  const source=String(text==null?'':text);
+  const terms=searchTermsOf(query);
+  if(!terms.length) return source;
+  let folded='';
+  const map=[];
+  for(let i=0;i<source.length;i++){
+    const piece=foldSearchText(source.charAt(i));
+    for(let j=0;j<piece.length;j++){folded+=piece.charAt(j);map.push(i);}
+  }
+  const ranges=[];
+  terms.forEach(function(term){
+    let from=0,idx;
+    while((idx=folded.indexOf(term,from))>=0){
+      ranges.push([map[idx],map[idx+term.length-1]+1]);
+      from=idx+term.length;
+    }
+  });
+  if(!ranges.length) return source;
+  ranges.sort(function(a,b){return a[0]-b[0]||b[1]-a[1]});
+  const merged=[];
+  ranges.forEach(function(r){
+    const last=merged[merged.length-1];
+    if(last&&r[0]<=last[1]){
+      if(r[1]>last[1]) last[1]=r[1];
+    }else{
+      merged.push([r[0],r[1]]);
+    }
+  });
+  let html='',pos=0;
+  merged.forEach(function(r){
+    html+=source.slice(pos,r[0])+'<mark class="bg-amber-200 text-amber-900">'+source.slice(r[0],r[1])+'</mark>';
+    pos=r[1];
+  });
+  return html+source.slice(pos);
 }
 
 function selectAutocompleteProduct(pid){
   const p=DB.products().find(function(x){return x.id===pid});
   if(!p) return;
   hideSearchAutocomplete();
-  const input=document.getElementById('search-input');
-  if(input) input.value=p.name;
-  updateSearch(p.name);
+  const input=document.getElementById('global-search-input');
+  if(input) input.blur();
   setTimeout(function(){
     navigate('product',{productId:pid});
   },50);
 }
 
-function handleSearchKeydown(e){
-  const dropdown=document.getElementById('search-autocomplete');
-  if(!dropdown||dropdown.classList.contains('hidden')) return;
+// Navegacao por teclado nas sugestoes (setas/Enter).
+function searchAutocompleteKeydown(e,dropdown){
+  if(!dropdown||dropdown.classList.contains('hidden')) return false;
   const items=dropdown.querySelectorAll('button');
-  if(!items.length) return;
+  if(!items.length) return false;
   const active=dropdown.querySelector('button:focus');
   let index=active?Array.from(items).indexOf(active):-1;
   if(e.key==='ArrowDown'){
     e.preventDefault();
     index=Math.min(index+1,items.length-1);
     items[index].focus();
+    return true;
   }else if(e.key==='ArrowUp'){
     e.preventDefault();
     index=Math.max(index-1,0);
     items[index].focus();
+    return true;
   }else if(e.key==='Enter'&&active){
     e.preventDefault();
     active.click();
-  }else if(e.key==='Escape'){
+    return true;
+  }
+  return false;
+}
+
+function handleGlobalSearchKeydown(e){
+  if(searchAutocompleteKeydown(e,document.getElementById('global-search-autocomplete'))) return;
+  if(e.key==='Enter'){
+    e.preventDefault();
+    globalSearchSubmit();
+    return;
+  }
+  if(e.key==='Escape'){
     hideSearchAutocomplete();
-    document.getElementById('search-input').blur();
+    if(e.target&&e.target.blur) e.target.blur();
   }
 }
 
-function updateSearch(val){
-  const f=DB.filters();
-  f.search=val;
-  DB.setFilters(f);
-  const clearBtn=document.getElementById('search-clear');
-  if(clearBtn) clearBtn.style.display=val?'flex':'none';
-  if(val&&val.trim().length>=2)trackSearch(val.trim());
-  // Autocomplete com debounce (150 ms): o dropdown nao recalcula a cada tecla.
-  clearTimeout(window._sact);
+function setGlobalSearchValue(v){
+  var gi=document.getElementById('global-search-input');
+  if(gi&&document.activeElement!==gi) gi.value=v||'';
+  var cb=document.getElementById('global-search-clear');
+  if(cb) cb.style.display=(v&&String(v).length)?'flex':'none';
+}
+
+function onGlobalSearchInput(val){
+  var cb=document.getElementById('global-search-clear');
+  if(cb) cb.style.display=val?'flex':'none';
+  clearTimeout(window._gsact);
   if(val&&val.trim().length>=2){
-    window._sact=setTimeout(function(){ showSearchAutocomplete(val); },150);
+    window._gsact=setTimeout(function(){ showSearchAutocomplete(val); },150);
   }else{
     hideSearchAutocomplete();
   }
-  clearTimeout(window._st);
-  window._st=setTimeout(function(){
-    if(State.view!=='catalog') return;
-    if(document.getElementById('catalog-grid-area')){
-      updateCatalogResults();
-    } else {
-      render();
-    }
+}
+
+function clearGlobalSearch(){
+  var gi=document.getElementById('global-search-input');
+  if(gi) gi.value='';
+  var cb=document.getElementById('global-search-clear');
+  if(cb) cb.style.display='none';
+  hideSearchAutocomplete();
+  const f=DB.filters();
+  f.search='';
+  DB.setFilters(f);
+  if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
+    try{ updateCatalogResults(); }catch(e){ render(); }
     syncNavHash();
-  },300);
+  }
+  if(gi) gi.focus();
+}
+
+function globalSearchSubmit(){
+  var gi=document.getElementById('global-search-input');
+  var val=((gi&&gi.value)||'').trim();
+  hideSearchAutocomplete();
+  if(gi) gi.blur();
+  if(val&&val.length>=2) trackSearch(val);
+  const f=DB.filters();
+  f.search=val;
+  DB.setFilters(f);
+  if(State.view==='catalog'&&document.getElementById('catalog-grid-area')){
+    try{ updateCatalogResults(); }catch(e){ render(); }
+    window.scrollTo({top:0,behavior:'smooth'});
+    syncNavHash();
+  }else{
+    navigate('catalog');
+  }
 }
 
 document.addEventListener('click',function(e){
-  const dropdown=document.getElementById('search-autocomplete');
-  const input=document.getElementById('search-input');
+  const dropdown=document.getElementById('global-search-autocomplete');
+  const input=document.getElementById('global-search-input');
   if(dropdown&&input&&!dropdown.contains(e.target)&&e.target!==input){
     hideSearchAutocomplete();
-  }
-});
-
-document.addEventListener('keydown',function(e){
-  if(e.target&&e.target.id==='search-input'){
-    handleSearchKeydown(e);
   }
 });
 
@@ -4072,8 +4203,8 @@ function updateSort(val){const f=DB.filters();f.sort=val;DB.setFilters(f);syncNa
 function toggleCategory(cat){const f=DB.filters();const next=f.category===cat?'':cat;if(next)trackEvent('filter',{kind:'category',value:cat});f.category=next;if(next){f.species='';f.brand='';catalogSpeciesOpen=true;catalogBrandOpen=true;}DB.setFilters(f);syncNavHash();render()}
 function toggleSpecies(s){const f=DB.filters();const next=f.species===s?'':s;if(next)trackEvent('filter',{kind:'species',value:s});f.species=next;DB.setFilters(f);syncNavHash();render()}
 function toggleBrand(b){const f=DB.filters();const next=f.brand===b?'':b;if(next)trackEvent('filter',{kind:'brand',value:b});f.brand=next;DB.setFilters(f);syncNavHash();render()}
-function clearFilters(){resetCatalogFilterUI();DB.setFilters({category:'',species:'',brand:'',search:'',sort:'views'});syncNavHash();render()}
-function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});catalogShowAllCats=false;catalogSpeciesOpen=true;catalogBrandOpen=true;DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'views'});navigate('catalog')}
+function clearFilters(){resetCatalogFilterUI();DB.setFilters({category:'',species:'',brand:'',search:'',sort:'views'});setGlobalSearchValue('');syncNavHash();render()}
+function filterCategory(cat){if(cat)trackEvent('filter',{kind:'category',value:cat});catalogShowAllCats=false;catalogSpeciesOpen=true;catalogBrandOpen=true;DB.setFilters({category:cat,species:'',brand:'',search:'',sort:'views'});setGlobalSearchValue('');navigate('catalog')}
 function submitContactForm(){
   const name=document.getElementById('contact-name').value.trim();
   const phone=document.getElementById('contact-phone').value.trim();

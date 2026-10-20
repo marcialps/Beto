@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agrovel-v9';
+const CACHE_NAME = 'agrovel-v10';
 // '/' e '/index.html' apontam para o mesmo arquivo: manter os dois duplicava
 // o download na instalacao do service worker. O logo.gif (810 KB) nao e usado
 // em nenhuma tela e tambem saiu do precache.
