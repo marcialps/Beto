@@ -1,4 +1,4 @@
-const CACHE_NAME = 'agrovel-v10';
+const CACHE_NAME = 'agrovel-v12';
 // '/' e '/index.html' apontam para o mesmo arquivo: manter os dois duplicava
 // o download na instalacao do service worker. O logo.gif (810 KB) nao e usado
 // em nenhuma tela e tambem saiu do precache.
@@ -6,6 +6,7 @@ const STATIC_ASSETS = [
   '/index.html',
   '/firebase-config.js',
   '/admin-config.js',
+  '/bombastico.js',
   '/css/style.css'
 ];
 const STORAGE_HOSTS = ['firebasestorage.googleapis.com', 'storage.googleapis.com'];
