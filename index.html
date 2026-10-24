@@ -3455,16 +3455,62 @@ function foldSearchText(value){
 }
 
 // Divide a busca em termos independentes: "racao filhote" vira
-// ["racao","filhote"]. A ordem nao importa e cada termo pode estar em
-// qualquer campo do produto (nome, descricao, categoria, marca etc.).
+// ["racao","filhote"]. A ordem nao importa e cada termo precisa estar no
+// MESMO produto (nome, descricao, categoria, marca etc.). Pontuacao tambem
+// separa termos ("racao, filhote").
 function searchTermsOf(query){
-  var parts=foldSearchText(query).split(/\s+/);
+  var parts=foldSearchText(query).split(/[^a-z0-9]+/);
   var terms=[];
   for(var i=0;i<parts.length;i++){
     var term=parts[i];
     if(term&&terms.indexOf(term)<0) terms.push(term);
   }
   return terms;
+}
+
+// Variacoes simples de plural/singular do termo digitado. Sem isso, "racao"
+// nao encontraria "Rações" e "cao" nao encontraria "Cães".
+var _searchTermVariantsCache=Object.create(null);
+function searchTermVariants(term){
+  var cached=_searchTermVariantsCache[term];
+  if(cached) return cached;
+  var out=[term];
+  function add(v){ if(v&&v.length>=2&&out.indexOf(v)<0) out.push(v); }
+  if(term.length>3){
+    if(/[aeiou]s$/.test(term)) add(term.slice(0,-1));
+    if(/oes$/.test(term)) add(term.slice(0,-3)+'ao');
+    if(/aes$/.test(term)) add(term.slice(0,-3)+'ao');
+    if(/aos$/.test(term)) add(term.slice(0,-3)+'ao');
+    if(/ao$/.test(term)){ add(term.slice(0,-2)+'oes'); add(term.slice(0,-2)+'aes'); }
+    if(/ais$/.test(term)) add(term.slice(0,-3)+'al');
+    if(/eis$/.test(term)) add(term.slice(0,-3)+'el');
+    if(/ois$/.test(term)) add(term.slice(0,-3)+'ol');
+    if(/ns$/.test(term)) add(term.slice(0,-2)+'m');
+    if(/l$/.test(term)) add(term.slice(0,-1)+'is');
+    if(/m$/.test(term)) add(term.slice(0,-1)+'ns');
+  }
+  _searchTermVariantsCache[term]=out;
+  return out;
+}
+
+// Verdadeiro quando o termo aparece INICIANDO uma palavra. Isso impede que
+// "racao" case dentro de "administracao" ou "preparacao" - causa de produtos
+// sem relacao nenhuma aparecerem na busca. O prefixo continua valendo para
+// a busca ir encontrando enquanto o usuario digita ("rac" -> "racao").
+function searchTextHasTermStart(text,term){
+  var from=0,idx;
+  while((idx=text.indexOf(term,from))>=0){
+    if(idx===0||!/[a-z0-9]/.test(text.charAt(idx-1))) return true;
+    from=idx+1;
+  }
+  return false;
+}
+function searchTextHasTerm(text,term){
+  var variants=searchTermVariants(term);
+  for(var i=0;i<variants.length;i++){
+    if(searchTextHasTermStart(text,variants[i])) return true;
+  }
+  return false;
 }
 
 // Texto de busca pre-computado por produto (WeakMap): evita remontar a
@@ -3476,19 +3522,25 @@ function searchTextOf(p){
   if(!p) return '';
   var cached=_productSearchText.get(p);
   if(cached!==undefined) return cached;
-  var t=foldSearchText([p.name,p.description,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' '),(p.tagsText||'')].join(' '));
+  var raw=[p.name,p.description,p.category,p.brand,p.species,p.sku,(p.tags||[]).join(' '),(p.tagsText||'')].join(' ');
+  // Separa palavras compostas (BR4Dogs -> BR4 Dogs, CassPads -> Cass Pads)
+  // para que buscas como "dog" ou "pads" tambem encontrem marcas escritas
+  // sem espaco. O texto original continua no indice.
+  var expanded=raw.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/([0-9])([A-Za-z])/g,'$1 $2');
+  var t=foldSearchText(raw+' '+expanded);
   _productSearchText.set(p,t);
   return t;
 }
 
-// Verdadeiro quando TODOS os termos aparecem no texto do produto, em
-// qualquer posicao/ordem. Ex.: "racao filhote" encontra "Racao Dog Filhote"
-// e "Racao Gato Filhote".
+// Verdadeiro quando TODOS os termos aparecem no MESMO produto, em qualquer
+// posicao/ordem, sempre no inicio de alguma palavra (ou como prefixo dela).
+// Ex.: "racao filhote" so traz produtos que tenham racao E filhote; nao
+// mistura o universo de racao com o universo de filhote.
 function productMatchesSearch(p,terms){
   if(!terms||!terms.length) return true;
   var text=searchTextOf(p);
   for(var i=0;i<terms.length;i++){
-    if(text.indexOf(terms[i])<0) return false;
+    if(!searchTextHasTerm(text,terms[i])) return false;
   }
   return true;
 }
