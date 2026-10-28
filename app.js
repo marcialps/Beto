@@ -2456,10 +2456,49 @@ function renderCategoryNavs(){
   }).join('');
 }
 
+function mobileMenuAvailableHeight(menu){
+  try{
+    var top=menu.getBoundingClientRect().top;
+    var vh=(window.visualViewport&&window.visualViewport.height)||window.innerHeight||document.documentElement.clientHeight;
+    return Math.max(120,Math.floor(vh-top-8))+'px';
+  }catch(e){ return ''; }
+}
+
+function closeMobileMenu(){
+  var menu=document.getElementById('mobile-menu');
+  if(!menu) return;
+  menu.classList.remove('open');
+  menu.style.maxHeight='';
+}
+
 function toggleMobileMenu(){
   var menu=document.getElementById('mobile-menu');
-  if(menu) menu.classList.toggle('open');
+  if(!menu) return;
+  if(menu.classList.contains('open')){
+    closeMobileMenu();
+    return;
+  }
+  // O menu comeca abaixo da barra superior + campo de busca. Medir a posicao
+  // real evita que as ultimas categorias fiquem fora da tela no smartphone.
+  var h=mobileMenuAvailableHeight(menu);
+  if(h) menu.style.maxHeight=h;
+  menu.classList.add('open');
 }
+
+// Mantem o menu dentro da tela ao girar o aparelho/abrir o teclado e fecha
+// automaticamente se a janela voltar ao tamanho de desktop.
+window.addEventListener('resize',function(){
+  var menu=document.getElementById('mobile-menu');
+  if(!menu) return;
+  if(window.innerWidth>=768){ closeMobileMenu(); return; }
+  if(menu.classList.contains('open')){
+    var h=mobileMenuAvailableHeight(menu);
+    if(h) menu.style.maxHeight=h;
+  }
+});
+document.addEventListener('keydown',function(e){
+  if(e.key==='Escape') closeMobileMenu();
+});
 
 function toggleAdminSidebar(){
   var sidebar=document.querySelector('.admin-sidebar');
@@ -2487,8 +2526,7 @@ function navigate(view,params){
   if(view.startsWith('admin')&&!user){navigate('login');return}
   if(view.startsWith('admin')&&user&&user.role==='guest'){showToast('Sem permissao para esta area','error');return}
   if(view==='admin'&&user&&user.role==='seller'){State.adminSection='products';State.view='admin';appPushState();render();return}
-  var mm=document.getElementById('mobile-menu');
-  if(mm)mm.classList.remove('open');
+  closeMobileMenu();
   State.view=view;
   Object.assign(State,params);
   // Empurra a rota ANTES de renderizar: render() completa a URL do produto
@@ -2624,6 +2662,7 @@ function buildNavPath(){
 
 function applyNavState(parsed,opts){
   opts=opts||{};
+  closeMobileMenu();
   var st=parsed&&parsed.state?parsed.state:null;
   if(st&&st.view){
     if(st.view.indexOf('admin')===0){
@@ -4708,8 +4747,7 @@ function closeAllPanels(){
   document.getElementById('cart-sidebar').classList.remove('open');
   document.getElementById('copilot-panel').classList.remove('open');
   closeAdminSidebar();
-  var mm=document.getElementById('mobile-menu');
-  if(mm)mm.classList.remove('open');
+  closeMobileMenu();
 }
 
 function renderCartSidebar(){

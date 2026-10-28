@@ -1,7 +1,7 @@
 /* Agrovel — service worker com caminhos relativos ao escopo.
    Funciona tanto em https://agrovel.agr.br/ quanto em
    https://marcialps.github.io/Beto/. */
-const CACHE_NAME = 'agrovel-v18';
+const CACHE_NAME = 'agrovel-v19';
 const SCOPE = self.registration.scope;
 const STATIC_PATHS = [
   'index.html',
