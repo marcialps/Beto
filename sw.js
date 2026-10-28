@@ -1,15 +1,22 @@
-const CACHE_NAME = 'agrovel-v13';
-// '/' e '/index.html' apontam para o mesmo arquivo: manter os dois duplicava
-// o download na instalacao do service worker. O logo.gif (810 KB) nao e usado
-// em nenhuma tela e tambem saiu do precache.
-const STATIC_ASSETS = [
-  '/index.html',
-  '/firebase-config.js',
-  '/admin-config.js',
-  '/bombastico.js',
-  '/css/style.css'
+/* Agrovel — service worker com caminhos relativos ao escopo.
+   Funciona tanto em https://agrovel.agr.br/ quanto em
+   https://marcialps.github.io/Beto/. */
+const CACHE_NAME = 'agrovel-v18';
+const SCOPE = self.registration.scope;
+const STATIC_PATHS = [
+  'index.html',
+  'app.js',
+  'firebase-config.js',
+  'admin-config.js',
+  'bombastico.js',
+  'css/style.css',
+  'img/logo.webp'
 ];
 const STORAGE_HOSTS = ['firebasestorage.googleapis.com', 'storage.googleapis.com'];
+
+function scopeUrl(path) {
+  return new URL(path, SCOPE).href;
+}
 
 async function openCache() {
   return caches.open(CACHE_NAME);
@@ -26,19 +33,23 @@ function supportsMediaCache(url) {
 // Adiciona ao cache com timeout: em rede lenta um arquivo grande nao pode
 // pendurar a instalacao do service worker para sempre.
 function cacheAddTimed(cache, url, ms) {
+  // cache:'reload' ignora o cache HTTP e garante que a instalacao guarde a
+  // versao recem-publicada (GitHub Pages costuma responder com max-age).
+  const fresh = fetch(url, { cache: 'reload' }).then(function (response) {
+    if (response && response.ok) return cache.put(url, response);
+  }).catch(function () {});
   return Promise.race([
-    cache.add(url).catch(function () {}),
+    fresh,
     new Promise(function (res) { setTimeout(res, ms); })
   ]);
 }
 
 // Serve do cache IMEDIATAMENTE e atualiza o cache em segundo plano.
-// É o padrão ideal para internet lenta: nada precisa esperar a rede.
-async function staleWhileRevalidate(request, useIndexFallback) {
+async function staleWhileRevalidate(request, fallbackUrl) {
   const cache = await openCache();
   let cached = await cache.match(request);
-  if (!cached && useIndexFallback) {
-    cached = await cache.match('/index.html');
+  if (!cached && fallbackUrl) {
+    cached = await cache.match(fallbackUrl);
   }
 
   const networkFetch = fetch(request).then(function (response) {
@@ -51,7 +62,6 @@ async function staleWhileRevalidate(request, useIndexFallback) {
   });
 
   if (cached) {
-    // Atualiza o cache em background, sem bloquear a resposta atual.
     networkFetch.then(function () {});
     return cached;
   }
@@ -69,11 +79,9 @@ const OFFLINE_RESPONSE = new Response(
 self.addEventListener('install', function (event) {
   event.waitUntil(
     openCache().then(function (cache) {
-      // Instalacao resiliente: se um asset falhar (ex.: internet lenta),
-      // os demais ainda sao cacheados e o service worker instala normalmente.
       return Promise.allSettled(
-        STATIC_ASSETS.map(function (url) {
-          return cacheAddTimed(cache, url, 15000);
+        STATIC_PATHS.map(function (path) {
+          return cacheAddTimed(cache, scopeUrl(path), 15000);
         })
       );
     })
@@ -97,28 +105,26 @@ self.addEventListener('activate', function (event) {
 self.addEventListener('fetch', function (event) {
   const url = new URL(event.request.url);
 
-  // Nao interceptar uploads do Storage (resumable upload usa POST) nem
-  // qualquer metodo que nao seja GET.
   if (event.request.method !== 'GET') return;
-
-  // Uploads do Storage tambem sao GETs de verificacao de upload; evita cachear.
   if (isStorageRequest(url) && /(uploadType=resumable|\/upload\?)/.test(event.request.url)) return;
 
   // Imagens do catalogo (Firebase Storage): cache-first + revalidacao.
   if (isStorageRequest(url)) {
-    event.respondWith(staleWhileRevalidate(event.request, false));
+    event.respondWith(staleWhileRevalidate(event.request, null));
     return;
   }
 
-  // Navegacao: abre IMEDIATAMENTE o HTML do cache e atualiza em background.
+  // Navegacao: entrega o HTML em cache na hora e atualiza em segundo plano.
+  // O shell do index.html tem <base> recalculado por script, entao pode ser
+  // usado como fallback de qualquer rota (inclusive produto/blog).
   if (event.request.mode === 'navigate') {
-    event.respondWith(staleWhileRevalidate(event.request, true));
+    event.respondWith(staleWhileRevalidate(event.request, scopeUrl('index.html')));
     return;
   }
 
   // CDNs estaveis (Font Awesome / fontes) e assets locais: cache + revalidacao.
   if (supportsMediaCache(url) || url.origin === self.location.origin) {
-    event.respondWith(staleWhileRevalidate(event.request, false));
+    event.respondWith(staleWhileRevalidate(event.request, null));
     return;
   }
 });

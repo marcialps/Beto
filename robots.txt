@@ -1,0 +1,20 @@
+# robots.txt - Agrovel
+# Dominio definitivo: https://agrovel.agr.br
+
+User-agent: *
+Allow: /
+
+# Areas restritas / sem valor de busca
+Disallow: /admin
+Disallow: /admin/
+Disallow: /login
+Disallow: /login/
+Disallow: /carrinho
+Disallow: /carrinho/
+Disallow: /checkout
+Disallow: /checkout/
+Disallow: /pedido
+Disallow: /pedido/
+
+# Sitemap
+Sitemap: https://agrovel.agr.br/sitemap.xml
