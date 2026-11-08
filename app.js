@@ -299,7 +299,7 @@ const DB = (function(){
   // feitas FORA do painel admin (ex.: console do Firebase), que nao passam pela
   // revisao. Entre uma e outra, o catalogo e atualizado so por delta.
   const FULL_RESYNC_MAX_MS=7*24*60*60*1000;
-  const CRITICAL_KEYS=['categories','users','cart','promos','highlights','testimonials'];
+  const CRITICAL_KEYS=['categories','users','cart','promos','highlights','testimonials','views_reset_at'];
 
   // --- Cache do catalogo no IndexedDB ---
   // O catalogo completo (milhares de produtos) passou a ficar no IndexedDB:
@@ -1009,6 +1009,10 @@ const DB = (function(){
       mem['products_rev'] = (data.rev===undefined?null:data.rev);
       mem['products_wm'] = _tsMs(data.updatedAt);
       mem['products_deleted'] = Array.isArray(data.deleted)?data.deleted:[];
+      // Marco de reset do ranking de visualizacoes. Fica na raiz do documento
+      // (fora do mapa "v") justamente para nao ser apagado pelo recalculo de
+      // total/categorias/marcas. Nunca toca nos documentos dos produtos.
+      _applyViewsResetAt(data.viewsResetAt, false);
       // Se a revisao mudou depois que o cache ja foi liberado (corrida com
       // _tryCachedCatalog), agenda o delta. Sem isso, o listener inicial
       // podia ver a revisao ja atualizada e nao disparar nada.
@@ -1247,6 +1251,9 @@ const DB = (function(){
           }
           mem['products_wm']=_tsMs(data.updatedAt);
           mem['products_deleted']=Array.isArray(data.deleted)?data.deleted:[];
+          // Outro administrador pode resetar o ranking enquanto este cliente
+          // esta aberto: aplica o marco na hora e reordena a vitrine.
+          _applyViewsResetAt(data.viewsResetAt, true);
           const revChanged=(_normRev(data.rev)!==_normRev(mem['products_rev']));
           mem['products_rev']=_normRev(data.rev);
           if(revChanged&&_productsComplete&&!_productsDirty&&_catalogRunningGen===_productsLoadGen){
@@ -1436,16 +1443,30 @@ const DB = (function(){
     const tgen=++_topViewedGen;
     try{
       const col=_catalogReadCol();
-      var snap=await _withRetry(function(){return col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos');
-      if(_topViewedGen!==tgen) return false;
-      var list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
-      if(list.length){
-        _topViewedFromViews=true;
-      }else{
-        _topViewedFromViews=false;
-        snap=await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos (nome)');
+      // Depois de um reset por marco, os campos "views" antigos (inclusive a
+      // copia no indice leve) nao representam mais a contagem atual. A vitrine
+      // inicial cai para a ordem alfabetica; o ranking real e recalculado no
+      // cliente com os eventos product_view posteriores ao marco.
+      const viewsResetAt=_viewsResetAtMs();
+      var snap;
+      var list;
+      if(viewsResetAt>0){
+        snap=await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos (reset)');
         if(_topViewedGen!==tgen) return false;
         list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
+        _topViewedFromViews=false;
+      }else{
+        snap=await _withRetry(function(){return col.orderBy('views','desc').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos');
+        if(_topViewedGen!==tgen) return false;
+        list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
+        if(list.length){
+          _topViewedFromViews=true;
+        }else{
+          _topViewedFromViews=false;
+          snap=await _withRetry(function(){return col.orderBy('name').limit(PRODUCTS_TOP_VIEWED).get();}, 'mais vistos (nome)');
+          if(_topViewedGen!==tgen) return false;
+          list=snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id&&p.active!==false});
+        }
       }
       _topViewed=list;
       _topViewedReady=true;
@@ -1636,6 +1657,40 @@ const DB = (function(){
       _seedAlphaBatchJob={gen:gen,promise:p};
     }
     return _seedAlphaBatchJob.promise;
+  }
+
+  // Marco de reset do ranking "mais visualizados". O valor fica na RAIZ do
+  // documento products_meta (fora do mapa "v") para nao ser sobrescrito pelo
+  // recalculo dos contadores do catalogo. Nenhum produto ou evento e apagado:
+  // as visualizacoes anteriores ao marco apenas deixam de ser consideradas.
+  function _viewsResetAtMs(){ return _tsMs(mem['views_reset_at']); }
+  function _resetTopViewedState(){
+    _topViewed=[];
+    _topViewedReady=false;
+    _topViewedFromViews=false;
+    _topViewedGen++;
+    _seedTopViewedJob=null;
+    _seedAlphaBatchJob=null;
+    _catalogSeedMode=null;
+  }
+  function _applyViewsResetAt(value, notify){
+    var next=_tsMs(value);
+    var prev=_viewsResetAtMs();
+    mem['views_reset_at']=next;
+    if(next===prev) return false;
+    _resetTopViewedState();
+    if(typeof invalidateViewCountsCache==='function') invalidateViewCountsCache();
+    try{ saveCache(); }catch(e){}
+    if(notify){
+      try{
+        // Nao redesenhar a pagina de produto: render() ali registra uma nova
+        // visualizacao e o simples recebimento do marco inflaria a contagem.
+        if(State.view==='catalog'||State.view==='admin'){
+          if(typeof notifyProductsGrew==='function') notifyProductsGrew();
+        }
+      }catch(e){}
+    }
+    return true;
   }
 
   // FASE 3 (disparada de imediato na abertura, sem esperar popup/destaques/
@@ -2281,6 +2336,8 @@ const DB = (function(){
     topViewedProducts(){ return _topViewed; },
     topViewedFromViews(){ return !!_topViewedFromViews; },
     catalogSeedMode(){ return _catalogSeedMode; },
+    viewsResetAt(){ return _viewsResetAtMs(); },
+    _setViewsResetAt:function(ts){ _applyViewsResetAt(ts, true); return _viewsResetAtMs(); },
     productsMeta(){
       const m=mem['products_meta'];
       if(m&&typeof m.total==='number') return m;
@@ -3811,11 +3868,16 @@ function invalidateViewCountsCache(){ _viewCountsCache=null; _viewCountsVersion+
 function productViewCounts(){
   if(_viewCountsCache) return _viewCountsCache;
   var map={};
+  var resetAt=0;
+  try{ resetAt=DB.viewsResetAt()||0; }catch(e){}
   try{
     var ev=DB.events();
     if(Array.isArray(ev)){
       ev.forEach(function(e){
         if(e&&e.type==='product_view'&&e.productId){
+          // Depois de um reset por marco, eventos anteriores a ele continuam
+          // guardados (historico intacto), mas nao entram mais no ranking.
+          if(resetAt&&(Number(e.ts)||0)<resetAt) return;
           map[e.productId]=(map[e.productId]||0)+1;
         }
       });
@@ -3824,9 +3886,17 @@ function productViewCounts(){
   _viewCountsCache=map;
   return map;
 }
-function productViewScore(p,counts){
+function productViewScore(p,counts,viewsResetAt){
   if(!p||!p.id) return 0;
   var fromEvents=(counts&&counts[p.id])||0;
+  var resetAt=viewsResetAt;
+  if(resetAt===undefined){
+    try{ resetAt=DB.viewsResetAt()||0; }catch(e){ resetAt=0; }
+  }
+  // O campo "views" e legado e pode ter valores antigos (ou copia congelada no
+  // products_index). Com um marco de reset ativo, somente os eventos novos
+  // valem, tanto para o ranking do catalogo quanto para a vitrine inicial.
+  if(resetAt) return fromEvents;
   var fromField=Number(p.views)||0;
   return fromEvents>fromField?fromEvents:fromField;
 }
@@ -3860,7 +3930,9 @@ function getFilteredProducts(force){
   else if(filters.sort==='featured') filtered.sort(function(a,b){return(b.featured?1:0)-(a.featured?1:0)});
   else if(filters.sort==='views'){
     var counts=productViewCounts();
-    filtered.sort(function(a,b){var d=productViewScore(b,counts)-productViewScore(a,counts);return d!==0?d:compareByName(a,b)});
+    var viewsResetAt=0;
+    try{ viewsResetAt=DB.viewsResetAt()||0; }catch(e){}
+    filtered.sort(function(a,b){var d=productViewScore(b,counts,viewsResetAt)-productViewScore(a,counts,viewsResetAt);return d!==0?d:compareByName(a,b)});
   }
   else filtered.sort(compareByName);
   _filteredCache=filtered;
@@ -6032,6 +6104,8 @@ var _dbData=null;
 function renderDashboard(){
   var rng=State.analyticsRange||30;
   var ev=DB.events()||[];
+  var viewsResetAt=0;
+  try{ viewsResetAt=DB.viewsResetAt()||0; }catch(e){}
   var now=Date.now();
   var curCut=rng?now-rng*86400000:0;
   var cur=ev.filter(function(e){return e.ts>=curCut});
@@ -6041,7 +6115,10 @@ function renderDashboard(){
   var curW=anCount(cur,'whatsapp'),preW=anCount(prev,'whatsapp');
   var sEv=cur.filter(function(e){return e.type==='search'});
   var sTerms=anGroupCount(sEv,function(e){return e.term||''}).slice(0,12);
-  var vEv=cur.filter(function(e){return e.type==='product_view'});
+  // Visualizacoes de produto respeitam o marco de reset: o dashboard mostra
+  // apenas as views posteriores a ele. Os demais eventos continuam normais.
+  var vCut=viewsResetAt?Math.max(curCut,viewsResetAt):curCut;
+  var vEv=ev.filter(function(e){return e.type==='product_view'&&e.ts>=vCut});
   var vIds={};vEv.forEach(function(e){if(e.productId&&!vIds[e.productId])vIds[e.productId]=1});
   var cEv=cur.filter(function(e){return e.type==='contact'});
   var pvEv=cur.filter(function(e){return e.type==='page_view'});
@@ -6163,9 +6240,11 @@ function renderDashboard(){
   return'<div class="p-4 md:p-8 fade-in">'+
     '<div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6 gap-4">'+
       '<div><h1 class="text-xl md:text-2xl font-bold text-gray-900">Dashboard de Interesse</h1>'+
-        '<p class="text-gray-400 text-xs md:text-sm">Decisoes sobre produtos, marcas e ofertas baseadas em dados reais de navegacao &mdash; '+periodLabel+'</p></div>'+
+        '<p class="text-gray-400 text-xs md:text-sm">Decisoes sobre produtos, marcas e ofertas baseadas em dados reais de navegacao &mdash; '+periodLabel+'</p>'+
+        (viewsResetAt?'<p class="text-xs text-amber-600 mt-1"><i class="fas fa-fire mr-1"></i>Visualiza\u00e7\u00f5es de produtos contadas desde '+new Date(viewsResetAt).toLocaleString('pt-BR')+'.</p>':'')+'</div>'+
       '<div class="flex items-center gap-2 flex-wrap">'+
         '<div class="flex bg-gray-100 rounded-xl p-1">'+ranges.map(rangeBut).join('')+'</div>'+
+        '<button onclick="resetTopViewed()" title="Resetar a contagem dos produtos mais visualizados (não apaga produtos nem histórico)" class="h-9 px-3 flex items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white text-gray-400 hover:text-amber-600 hover:border-amber-200 transition-colors text-xs font-medium"><i class="fas fa-fire text-sm"></i><span class="hidden sm:inline">Resetar mais vistos</span></button>'+
         '<button onclick="exportAnalytics()" title="Baixar historico de analises (backup JSON)" class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 hover:text-green-600 hover:border-green-200 transition-colors"><i class="fas fa-download text-sm"></i></button>'+
         '<button onclick="resetAnalytics()" title="Zerar contador (arquiva o historico e reinicia a contagem p/ nova campanha)" class="w-9 h-9 flex items-center justify-center rounded-xl border border-gray-200 bg-white text-gray-400 hover:text-red-500 hover:border-red-200 transition-colors"><i class="fas fa-trash-alt text-sm"></i></button>'+
       '</div>'+
@@ -6274,10 +6353,47 @@ function setDashboardRange(n){
   renderAdminSection();
 }
 
+// Reset LOGICO do ranking "mais visualizados". Grava apenas um marco na raiz
+// do documento products_meta. Nenhum produto e apagado/alterado e nenhum
+// evento e removido: o historico continua no Firebase; apenas as visualizacoes
+// anteriores ao marco deixam de entrar no ranking e no dashboard.
+async function resetTopViewed(){
+  var u=DB.currentUser();
+  if(!u||u.role!=='admin'){ showToast('Sem permissao','error'); return; }
+  if(!confirm('Resetar a contagem dos produtos mais visualizados?\n\nNenhum produto cadastrado sera apagado e o historico de eventos sera mantido. A partir de agora, apenas as novas visualizacoes entram no ranking do catalogo e no dashboard.\n\nDeseja continuar?')) return;
+  if(!DB.fire.db){ showToast('Sem conexao com o Firebase. Tente novamente.','error'); return; }
+  var ts=Date.now();
+  try{
+    await DB.fire.db.collection('agrovel_data').doc('products_meta').set({
+      viewsResetAt: ts,
+      viewsResetAtIso: new Date(ts).toISOString(),
+      viewsResetBy: u.email||u.name||u.id||'admin'
+    },{merge:true});
+    DB._setViewsResetAt(ts);
+    renderAdminSection();
+    showToast('Contagem de visualizações resetada. Nenhum produto foi apagado.','success');
+  }catch(e){
+    console.error('resetTopViewed',e);
+    showToast('Nao foi possivel resetar. Verifique a conexao.','error');
+  }
+}
+
 async function resetAnalytics(){
   if(!confirm('Zerar o contador para acompanhar uma nova campanha?\n\nO historico atual sera ARQUIVADO em backup (pesquisavel no Firebase) e as contagens voltam a zero.'))return;
   try{
     var ev=(DB.events()||[]).slice();
+    var resetAt=Date.now();
+    var u=DB.currentUser();
+    // O reset geral tambem zera o ranking de visualizados. Gravamos o marco
+    // ANTES de apagar os eventos: se a escrita falhar, nada e removido.
+    if(DB.fire.db){
+      await DB.fire.db.collection('agrovel_data').doc('products_meta').set({
+        viewsResetAt: resetAt,
+        viewsResetAtIso: new Date(resetAt).toISOString(),
+        viewsResetBy: (u&&(u.email||u.name||u.id))||'admin'
+      },{merge:true});
+    }
+    DB._setViewsResetAt(resetAt);
     var stamp=new Date().toISOString().replace(/[:.]/g,'-');
     if(DB.fire.db){
       var base=DB.fire.db.collection('agrovel_data').doc('events_archive').collection('resets').doc(stamp);
@@ -6285,7 +6401,7 @@ async function resetAnalytics(){
       await Promise.all(parts.map(function(part,idx){
         return base.collection('partes').doc('p'+(idx+1)).set({events:part});
       }));
-      await base.set({resetAt:new Date().toISOString(),count:ev.length,parts:parts.length});
+      await base.set({resetAt:new Date().toISOString(),count:ev.length,parts:parts.length,viewsResetAt:resetAt});
       DB._clearEventsMemo();
       var col=DB.fire.db.collection('agrovel_data').doc('events').collection('items');
       var snap=await col.get();
