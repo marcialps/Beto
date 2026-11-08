@@ -867,6 +867,10 @@ const DB = (function(){
   // restante do catalogo termina de chegar em segundo plano. Fica FORA de
   // mem['products'] para nao quebrar a ordem alfabetica do catalogo.
   const PRODUCTS_FEATURED_BATCH = 7;
+  // A consulta dedicada busca um pouco mais que o limite da vitrine para poder
+  // reconciliar os flags locais (inclusive os antigos) sem varrer o catalogo.
+  // O carrossel continua exibindo no maximo PRODUCTS_FEATURED_BATCH.
+  const PRODUCTS_FEATURED_QUERY_LIMIT = 50;
   // Ranking de mais visualizados: consulta dedicada, disparada em paralelo com
   // a FASE 1 (sem esperar o popup). Traz a vitrine inicial enquanto o restante
   // do catalogo continua chegando em lotes, em segundo plano. O limite e igual
@@ -884,6 +888,7 @@ const DB = (function(){
   let _productsLoadGen = 0;
   let _productsComplete = false;
   let _featuredProducts = [];
+  let _featuredReady = false;
   const _productLoadErrors = {};
   // Progresso da varredura sequencial do catalogo: ultimo documento ja baixado
   // ({byName,name,id,rev}), persistido no meta do IndexedDB para retomar o
@@ -1000,9 +1005,16 @@ const DB = (function(){
       mem['_idxComplete']=!!(data&&data.v&&typeof data.v.idxTotal==='number'&&data.v.idxTotal===data.v.total);
       // Estado da sincronizacao incremental (revisao + marco temporal + ids
       // excluidos). Doc antigo (sem patch) cai em rev=null.
+      const prevRev=_normRev(mem['products_rev']);
       mem['products_rev'] = (data.rev===undefined?null:data.rev);
       mem['products_wm'] = _tsMs(data.updatedAt);
       mem['products_deleted'] = Array.isArray(data.deleted)?data.deleted:[];
+      // Se a revisao mudou depois que o cache ja foi liberado (corrida com
+      // _tryCachedCatalog), agenda o delta. Sem isso, o listener inicial
+      // podia ver a revisao ja atualizada e nao disparar nada.
+      if(_normRev(mem['products_rev'])!==prevRev && _productsComplete && !_productsDirty && _catalogRunningGen===_productsLoadGen){
+        _scheduleDeltaSync();
+      }
     }catch(e){ console.error('FB load products_meta', e); }
   }
 
@@ -1328,10 +1340,20 @@ const DB = (function(){
       // Conferencia de contagem: se o total do banco nao bate com o cache
       // local (mudanca perdida/fora do admin), faz a carga completa.
       const list=Array.isArray(mem['products'])?mem['products']:[];
-      if(!list.length||list.length!==meta.total) return false;
+      const metaNow=mem['products_meta']||meta;
+      if(!list.length||list.length!==metaNow.total) return false;
       _productsComplete=true;
       mem['_loading']=false;
       mem['_loadError']=false;
+      // Rechecagem: loadProductsMeta/meta listener podem ter chegado enquanto
+      // validavamos o cache. Se a revisao mudou, aplica o delta AGORA, antes de
+      // carimbar _cacheSync como sincronizado (o carimbo com a revisao nova
+      // faria o delta ser considerado desnecessario e o cache ficaria velho).
+      if(_normRev(_cacheSync.rev)!==_normRev(mem['products_rev'])){
+        const ok=await _syncDeltaFromMeta(gen);
+        if(_productsLoadGen!==gen) return true;
+        if(!ok){ _productsComplete=false; return false; }
+      }
       // O catalogo em memoria ja esta em sincronia com o servidor (revisao e
       // contagem conferidas): renova o baseline do admin, tambem para o caso
       // do delta acima ter trocado produtos.
@@ -1358,19 +1380,46 @@ const DB = (function(){
   // sem baguncar a ordem alfabetica da grade.
   async function _fetchFeaturedProducts(gen){
     _featuredProducts = [];
+    _featuredReady = false;
     if(!fire.db) return;
     try{
-      // Colecao leve (products_index) quando o indice esta completo: o
-      // carrossel so precisa de campos leves e abre bem mais rapido.
-      const col = _catalogReadCol();
-      const snap = await _withRetry(function(){return col.where('featured','==',true).limit(PRODUCTS_FEATURED_BATCH).get();}, 'destaques');
+      // Consulta SEMPRE na colecao completa: sao poucos documentos (limite 50)
+      // e ela e a fonte da verdade do flag "featured". A colecao products_index
+      // pode estar defasada e, em alguns cenarios, o visitante lia o indice
+      // antigo enquanto o admin gravava apenas o documento completo.
+      const col = productsCol();
+      const snap = await _withRetry(function(){return col.where('featured','==',true).limit(PRODUCTS_FEATURED_QUERY_LIMIT).get();}, 'destaques');
       if(_productsLoadGen!==gen) return;
       const list = snap.docs.map(function(d){return d.data()}).filter(function(p){return p&&p.id});
       list.sort(compareByName);
       _featuredProducts = list;
+      _featuredReady = true;
+      // Reconcilia o catalogo local com a consulta fresca. Sem isso, um
+      // visitante que volta com o IndexedDB antigo continua com os flags
+      // "featured" do cache e o carrossel/ordenacao mostram destaques velhos.
+      // So faz isso quando a consulta trouxe todos os destaques (menos que o
+      // limite) e quando nao ha alteracao local pendente de gravacao.
+      if(!_productsDirty && list.length < PRODUCTS_FEATURED_QUERY_LIMIT){
+        const fresh={};
+        list.forEach(function(p){ fresh[p.id]=1; });
+        const cur=Array.isArray(mem['products'])?mem['products']:[];
+        let changed=false;
+        for(let i=0;i<cur.length;i++){
+          const p=cur[i];
+          if(!p||!p.id) continue;
+          const should=!!fresh[p.id];
+          if(!!p.featured!==should){
+            p.featured=should;
+            _productsBaseline[p.id]=JSON.stringify(p);
+            changed=true;
+          }
+        }
+        if(changed) _markProductsChanged(-1);
+      }
       try{ if(typeof notifyProductsGrew==='function') notifyProductsGrew(); }catch(e){}
     }catch(e){
       console.error('FB load featured products', e);
+      _featuredReady=false;
     }
   }
 
@@ -2213,6 +2262,21 @@ const DB = (function(){
     // Buffer proprio com os produtos em destaque (busca dedicada). Exibido no
     // carrossel sem precisar que o catalogo esteja completo.
     featuredProducts(){ return _featuredProducts; },
+    featuredReady(){ return !!_featuredReady; },
+    // Mantem o buffer de destaques coerente com uma alteracao feita no painel
+    // (ligar/desligar destaque, editar ou excluir produto) sem depender de uma
+    // nova consulta ao servidor.
+    syncFeaturedProduct(p,on){
+      if(!p||!p.id) return false;
+      var list=Array.isArray(_featuredProducts)?_featuredProducts.slice():[];
+      var i=-1;
+      for(var j=0;j<list.length;j++){ if(list[j]&&list[j].id===p.id){ i=j; break; } }
+      if(on){ if(i<0) list.push(p); else list[i]=p; }
+      else if(i>=0) list.splice(i,1);
+      _featuredProducts=list;
+      _featuredReady=true;
+      return true;
+    },
     // Buffer com a vitrine inicial de mais visualizados (consulta dedicada).
     topViewedProducts(){ return _topViewed; },
     topViewedFromViews(){ return !!_topViewedFromViews; },
@@ -3250,16 +3314,27 @@ function carouselProductImgHTML(p,i){
 function getCarouselHighlights(){
   var seen={}, products=[], byId={};
   DB.products().forEach(function(p){ if(p&&p.id) byId[p.id]=p; });
-  function add(p){
-    if(!p||!p.id||!p.active||!p.featured||seen[p.id]) return;
+  function add(p,lenientActive){
+    if(!p||!p.id||p.active===false||!p.featured||seen[p.id]) return;
+    if(!lenientActive&&!p.active) return;
     seen[p.id]=1; products.push(p);
   }
-  // Buffer proprio dos destaques (busca dedicada) abre o carrossel ja
-  // completo, mesmo que o catalogo ainda esteja carregando em lotes. Quando o
-  // produto ja esta no catalogo local, vale a versao local: ela reflete alteracoes
-  // feitas no painel depois que o buffer foi montado (ligar/desligar destaque).
-  try{ DB.featuredProducts().forEach(function(p){ add(byId[p.id]||p); }); }catch(e){}
-  DB.products().forEach(add);
+  var buffer=DB.featuredProducts();
+  if(DB.featuredReady()){
+    // A consulta dedicada e a fonte da verdade: se ela respondeu, o conjunto
+    // de destaques e exatamente este (mesmo que o catalogo local esteja com
+    // flags antigos). A copia local entra apenas para enriquecer a exibicao.
+    buffer.forEach(function(fp){
+      if(!fp||!fp.id||fp.active===false) return;
+      var local=byId[fp.id];
+      var merged=local?Object.assign({},local,{featured:true,active:true}):Object.assign({},fp,{featured:true});
+      add(merged,true);
+    });
+  } else {
+    // Consulta indisponivel (offline/erro): usa o cache local como fallback.
+    DB.products().forEach(function(p){ add(p,false); });
+    try{ buffer.forEach(function(p){ add(byId[p.id]||p,true); }); }catch(e){}
+  }
   products=products.slice(0,7);
   var items=products.map(function(p){return{type:'product',p:p}});
   var camps=(DB.highlights()||[]).filter(function(h){return h&&h.active});
@@ -3278,8 +3353,14 @@ function featuredProductCount(excludeId){
     seen[p.id]=1;
     if(p.featured) n++;
   }
-  DB.products().forEach(add);
-  try{ DB.featuredProducts().forEach(add); }catch(e){}
+  if(DB.featuredReady()){
+    // Consulta fresca: conta exatamente o que esta no servidor (mais as
+    // alteracoes locais desta sessao, refletidas no buffer).
+    DB.featuredProducts().forEach(add);
+  } else {
+    DB.products().forEach(add);
+    try{ DB.featuredProducts().forEach(add); }catch(e){}
+  }
   return n;
 }
 
@@ -3986,13 +4067,38 @@ function catalogSeedHeaderHTML(){
 // Atualiza SOMENTE o carrossel de destaques/highlights quando os itens mudam,
 // sem remontar a grade nem a pagina. Usado quando destaques, campanhas
 // (highlights) ou lotes novos do catalogo chegam depois do primeiro render.
+// Assinatura do conteudo do carrossel: detecta troca de destaques mesmo quando
+// a QUANTIDADE de slides continua igual (ex.: 5 antigos -> 5 novos). A versao
+// anterior comparava so items.length e por isso nunca redesenhava nesse caso.
+function carouselItemsSignature(items){
+  var parts=[];
+  for(var i=0;i<(items||[]).length;i++){
+    var it=items[i]||{};
+    if(it.type==='campaign'){
+      var c=it.c||{};
+      parts.push('c:'+[c.id||'',c.updatedAt||c.createdAt||'',c.title||'',c.text||'',c.image||'',c.active?1:0].join('~'));
+    }else{
+      var p=it.p||{};
+      var ts=p.updatedAt&&(p.updatedAt.seconds||p.updatedAt)||'';
+      parts.push('p:'+[p.id||'',ts,p.featured?1:0,p.active===false?0:1,p.name||'',p.price==null?'':p.price,(p.images&&p.images[0])||''].join('~'));
+    }
+  }
+  var s=parts.join('|'), h=0;
+  for(var j=0;j<s.length;j++){ h=((h<<5)-h+s.charCodeAt(j))|0; }
+  return String(h);
+}
+
 function refreshCatalogCarousel(){
   var cw=document.getElementById('catalog-carousel-wrap');
   if(!cw||cw.style.display==='none') return;
   var items=getCarouselHighlights();
-  if(items.length!==cw.querySelectorAll('.carousel-slide').length){
+  var sig=carouselItemsSignature(items);
+  if(cw.getAttribute('data-carousel-sig')!==sig){
+    var current=featCarouselIndex;
     cw.innerHTML=renderFeaturedCarousel(items);
+    cw.setAttribute('data-carousel-sig',sig);
     featInit();
+    if(current>0&&current<items.length) featGoTo(current);
   }
 }
 
@@ -4170,7 +4276,7 @@ function renderCatalog(){
       '<button id="catalog-retry-btn" onclick="retryCatalogLoad()" class="shrink-0 bg-amber-600 hover:bg-amber-700 text-white font-semibold px-4 py-2 rounded-xl transition-colors">'+(products.length?'Continuar carregando':'Tentar novamente')+'</button>'+
     '</div>'+
   '</div>':'')+
-  '<div id="catalog-carousel-wrap" style="display:'+(filters.category||filters.search||filters.species||filters.brand?'none':'block')+'">'+renderFeaturedCarousel(featured)+'</div>'+
+  '<div id="catalog-carousel-wrap" data-carousel-sig="'+carouselItemsSignature(featured)+'" style="display:'+(filters.category||filters.search||filters.species||filters.brand?'none':'block')+'">'+renderFeaturedCarousel(featured)+'</div>'+
 
   '<section id="catalog-section" class="max-w-7xl mx-auto px-4 py-10">'+
     '<div class="flex flex-col lg:flex-row gap-8">'+
@@ -6402,12 +6508,13 @@ function updateStock(id,val){
 
 function toggleProductActive(id){
   const products=DB.products();const p=products.find(function(x){return x.id===id});
-  if(p){p.active=!p.active;DB.setProducts(products);renderAdminSection();showToast(p.active?'Produto ativado!':'Produto desativado','info');}
+  if(p){p.active=!p.active;DB.setProducts(products);try{DB.syncFeaturedProduct(p,!!p.featured);}catch(e){}renderAdminSection();showToast(p.active?'Produto ativado!':'Produto desativado','info');}
 }
 
 function deleteProduct(id){
   if(!confirm('Tem certeza que deseja excluir este produto?')) return;
   const products=DB.products().filter(function(x){return x.id!==id});DB.setProducts(products);
+  try{DB.syncFeaturedProduct({id:id},false);}catch(e){}
   renderAdminSection();showToast('Produto excluido','warn');
 }
 
@@ -7071,6 +7178,7 @@ function toggleHighlightProduct(id){
   }
   p.featured=on;
   DB.setProducts(products);
+  try{ DB.syncFeaturedProduct(p,on); }catch(e){}
   var onCount=featuredProductCount(null);
   showToast(on?('Produto marcado como destaque ('+onCount+'/7).'):'Produto removido dos destaques','info');
   renderAdminSection();
@@ -7092,13 +7200,13 @@ function renderAdminHighlights(){
     return (a.name||'').localeCompare(b.name||'');
   });
   var onCount=featuredProductCount(null);
-  var overLimit=onCount>5;
-  var fills=onCount>5?0:5-onCount;
+  var overLimit=onCount>7;
+  var fills=onCount>7?0:7-onCount;
   var highlights=DB.highlights();
   var bars='';
-  var totalBars=Math.max(5,onCount);
+  var totalBars=Math.max(7,onCount);
   for(var i=0;i<totalBars;i++){
-    var col=i<onCount?(i<5?'#16a34a':'#ef4444'):'#e5e7eb';
+    var col=i<onCount?(i<7?'#16a34a':'#ef4444'):'#e5e7eb';
     bars+='<div style="width:28px;height:8px;border-radius:999px;background:'+col+'"></div>';
   }
   return '<div class="p-4 md:p-8 fade-in">'+
@@ -8490,6 +8598,8 @@ function saveProduct(e,id,retried){
       showToast('Produto criado com sucesso!');
     }
     DB.setProducts(products);
+    var savedProduct=id?products.find(function(x){return x.id===id;}):products[0];
+    if(savedProduct){try{DB.syncFeaturedProduct(savedProduct,!!savedProduct.featured);}catch(e){}}
     switchAdminSection('products');
     storeImagesAsync(folder,images,thumbs);
   }catch(err){
